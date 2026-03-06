@@ -26,7 +26,7 @@ import { Audio } from 'expo-av';
 import { Colors, Spacing, Radius, Shadow } from '../../lib/theme';
 import { useAuth } from '../../lib/auth-context';
 import { createThing, createArc, createVaultItem, getBubbles } from '../../lib/supabase';
-import { analyzeContent, ThingAnalysis } from '../../lib/claude';
+import { analyzeContent, analyzeImageContent, ThingAnalysis } from '../../lib/claude';
 import { Bubble } from '../../lib/types';
 
 type InputMode  = 'text' | 'checklist' | 'voice';
@@ -53,6 +53,7 @@ export default function CaptureScreen() {
   const [selectedBubble, setSelectedBubble] = useState<string | null>(null);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [isRecording, setIsRecording] = useState(false);
+  const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [saving, setSaving]     = useState(false);
 
   useEffect(() => {
@@ -83,25 +84,39 @@ export default function CaptureScreen() {
     setBody('[Voice note captured]');
   }
 
-  // ─── Image pick ─────────────────────────────────────────────────────────────
+  // ─── Image pick (with OCR via Claude Vision) ────────────────────────────────
   async function pickImage() {
-    const res = await ImagePicker.launchImageLibraryAsync({ quality: 0.8 });
+    const res = await ImagePicker.launchImageLibraryAsync({
+      quality: 0.8,
+      base64: true,
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+    });
     if (!res.canceled && res.assets[0]) {
+      const asset = res.assets[0];
       setTitle(prev => prev || 'Image capture');
-      setBody(res.assets[0].uri);
+      setBody('[Image selected — AI will extract text when you tap Save To]');
+      if (asset.base64) setImageBase64(asset.base64);
     }
   }
 
   // ─── Proceed to SAVE TO ──────────────────────────────────────────────────────
   async function handleSaveTo() {
     const content = title || body || checkItems.map(c => c.text).join(', ');
-    if (!content.trim()) {
-      Alert.alert('Nothing to save', 'Add a title or some content first.');
+    if (!content.trim() && !imageBase64) {
+      Alert.alert('Nothing to save', 'Add a title, some content, or an image first.');
       return;
     }
     setStage('analyzing');
     try {
-      const result = await analyzeContent(content, 'text');
+      let result;
+      if (imageBase64) {
+        // Use Claude Vision OCR for image content
+        result = await analyzeImageContent(imageBase64);
+        if (result.title) setTitle(result.title);
+        if (result.summary) setBody(result.summary);
+      } else {
+        result = await analyzeContent(content, 'text');
+      }
       setAnalysis(result);
       setDestination(result.destination);
     } catch {

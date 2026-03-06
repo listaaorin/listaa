@@ -83,8 +83,8 @@ export default function HomeScreen() {
   }
 
   function onItemPress(item: ListaaItem) {
-    if (item.isAdd)   { router.push('/(app)/capture'); return; }
-    if (item.isVault) { router.push('/(app)/search');  return; }
+    if (item.isAdd)   { router.push('/(app)/new-listaa'); return; }
+    if (item.isVault) { router.push('/(app)/search');     return; }
     // Open listaa content (arcs + vault items for this bubble)
     router.push({ pathname: '/(app)/arc/[id]', params: { id: item.id } });
   }

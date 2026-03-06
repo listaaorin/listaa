@@ -116,6 +116,63 @@ Write ONE short notification message (max 80 chars). No quotes. Be gentle, not n
   return text || `"${arcTitle}" is still open. Handle it today?`;
 }
 
+// ─── OCR + extract text from image via Claude Vision ─────────────────────────
+
+export async function analyzeImageContent(imageBase64: string, mimeType: string = 'image/jpeg'): Promise<ThingAnalysis> {
+  const message = await client.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 512,
+    messages: [{
+      role: 'user',
+      content: [
+        {
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: mimeType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
+            data: imageBase64,
+          },
+        },
+        {
+          type: 'text',
+          text: `You are Listaa's Silent Intelligence. Extract all text and key information from this image.
+
+Respond with valid JSON only (no markdown, no explanation):
+{
+  "title": "Short clear title describing what this image is (max 60 chars)",
+  "summary": "All important text extracted from the image + a one-line description",
+  "destination": "arc" | "vault",
+  "category": "contacts | documents | discoveries | memories | other",
+  "deadline": "ISO 8601 date string if a deadline/date is visible, otherwise null",
+  "location": "Location if visible, otherwise null",
+  "tags": ["relevant", "tags", "from", "content"],
+  "suggested_bubble": "Suggested bubble name or null",
+  "sub_tasks": []
+}
+
+Rules:
+- "arc" = receipts needing action, invitations, forms to fill, things requiring a response
+- "vault" = recipes, business cards, documents, screenshots, memories, discoveries
+- Extract ALL visible text accurately`,
+        },
+      ],
+    }],
+  });
+
+  const text = message.content[0].type === 'text' ? message.content[0].text : '';
+  try {
+    return JSON.parse(text) as ThingAnalysis;
+  } catch {
+    return {
+      title: 'Image capture',
+      summary: 'Image content captured. Unable to extract text.',
+      destination: 'vault',
+      tags: ['image'],
+      sub_tasks: [],
+    };
+  }
+}
+
 // ─── Search vault items ───────────────────────────────────────────────────────
 
 export async function searchVault(query: string, items: Array<{ title: string; content: string; tags?: string[] }>): Promise<number[]> {
