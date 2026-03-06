@@ -1,0 +1,67 @@
+{
+  "expo": {
+    "name": "Listaa",
+    "slug": "listaa",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F2F0EE"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.listaa.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Used to capture photos for your Things",
+        "NSMicrophoneUsageDescription": "Used to record voice notes for your Things",
+        "NSPhotoLibraryUsageDescription": "Used to add photos to your Things"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#F2F0EE"
+      },
+      "package": "com.listaa.app",
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-secure-store",
+      "expo-web-browser",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Listaa to access your photos to add to your Things"
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#7B1244"
+        }
+      ],
+      "expo-av"
+    ],
+    "scheme": "listaa",
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
