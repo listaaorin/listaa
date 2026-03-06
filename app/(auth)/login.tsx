@@ -5,12 +5,14 @@ import {
   StyleSheet,
   TouchableOpacity,
   TextInput,
+  ImageBackground,
   Linking,
   Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Dimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as WebBrowser from 'expo-web-browser';
@@ -26,6 +28,12 @@ import ListaaLogo from '../../components/shared/ListaaLogo';
 
 WebBrowser.maybeCompleteAuthSession();
 
+const { height: SCREEN_H } = Dimensions.get('window');
+const HERO_HEIGHT = SCREEN_H * 0.65;
+
+// Swap this for your real family photo — place it at assets/hero-family.jpg
+const HERO_IMAGE = require('../../assets/hero-family.jpg');
+
 type AuthMode = 'social' | 'email';
 
 export default function LoginScreen() {
@@ -35,7 +43,6 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [loading, setLoading]   = useState<string | null>(null);
 
-  // ─── Social auth ────────────────────────────────────────────────────────────
   async function handleSocial(provider: 'google' | 'apple' | 'facebook') {
     setLoading(provider);
     try {
@@ -49,7 +56,6 @@ export default function LoginScreen() {
     }
   }
 
-  // ─── Email auth ──────────────────────────────────────────────────────────────
   async function handleEmailAuth() {
     if (!email.trim() || !password.trim()) {
       Alert.alert('Missing fields', 'Please enter your email and password.');
@@ -67,7 +73,7 @@ export default function LoginScreen() {
         Alert.alert(
           'Check your email',
           'We sent you a confirmation link. Open it, then come back and sign in.',
-          [{ text: 'OK', onPress: () => setIsSignUp(false) }]
+          [{ text: 'OK', onPress: () => setIsSignUp(false) }],
         );
       }
     } finally {
@@ -77,163 +83,147 @@ export default function LoginScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1 }}
+      style={styles.root}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={styles.container}>
-        {/* Hero gradient top area */}
-        <LinearGradient
-          colors={['#1A0A2E', '#3B0A4A', '#7B1244', '#1A0A2E']}
-          locations={[0, 0.3, 0.65, 1]}
-          style={styles.hero}
-        >
-          {/* Logo */}
-          <View style={styles.logoWrap}>
-            <ListaaLogo size="xl" />
-          </View>
+      {/* ── Hero photo + logo + tagline ───────────────────────── */}
+      <ImageBackground
+        source={HERO_IMAGE}
+        style={styles.hero}
+        resizeMode="cover"
+      >
+        {/* Logo at top */}
+        <View style={styles.logoWrap}>
+          <ListaaLogo size="large" />
+        </View>
 
-          {/* Tagline */}
+        {/* Gradient + tagline at bottom of photo */}
+        <LinearGradient
+          colors={['transparent', 'rgba(0,0,0,0.55)', 'rgba(0,0,0,0.75)']}
+          style={styles.heroGradient}
+        >
           <Text style={styles.tagline}>
             Your life partner that{'\n'}remembers everything
           </Text>
         </LinearGradient>
+      </ImageBackground>
 
-        {/* Auth area */}
-        <ScrollView
-          style={styles.authArea}
-          contentContainerStyle={styles.authContent}
-          keyboardShouldPersistTaps="handled"
-        >
-          {mode === 'social' ? (
-            <>
-              <SocialButton
-                label="Continue with Apple"
-                icon="🍎"
-                onPress={() => handleSocial('apple')}
-                loading={loading === 'apple'}
-              />
-              <SocialButton
-                label="Continue with Google"
-                icon="G"
-                googleStyle
-                onPress={() => handleSocial('google')}
-                loading={loading === 'google'}
-              />
-              <SocialButton
-                label="Continue with Facebook"
-                icon="f"
-                facebookStyle
-                onPress={() => handleSocial('facebook')}
-                loading={loading === 'facebook'}
-              />
-
-              <View style={styles.divider}>
-                <View style={styles.dividerLine} />
-                <Text style={styles.dividerText}>or</Text>
-                <View style={styles.dividerLine} />
-              </View>
-
-              <TouchableOpacity
-                style={styles.emailToggleBtn}
-                onPress={() => setMode('email')}
-              >
-                <Text style={styles.emailToggleText}>Continue with Email</Text>
-              </TouchableOpacity>
-            </>
-          ) : (
-            <>
-              <TouchableOpacity
-                style={styles.backToSocial}
-                onPress={() => setMode('social')}
-              >
-                <Text style={styles.backToSocialText}>‹ Back</Text>
-              </TouchableOpacity>
-
-              <Text style={styles.emailTitle}>
-                {isSignUp ? 'Create your account' : 'Welcome back'}
-              </Text>
-
-              <TextInput
-                style={styles.input}
-                placeholder="Email address"
-                placeholderTextColor="rgba(255,255,255,0.4)"
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoComplete="email"
-              />
-              <TextInput
-                style={styles.input}
-                placeholder="Password"
-                placeholderTextColor="rgba(255,255,255,0.4)"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry
-                autoComplete={isSignUp ? 'new-password' : 'password'}
-              />
-
-              <TouchableOpacity
-                style={styles.emailSubmitBtn}
-                onPress={handleEmailAuth}
-                disabled={loading === 'email'}
-              >
-                {loading === 'email' ? (
-                  <ActivityIndicator color={Colors.white} />
-                ) : (
-                  <Text style={styles.emailSubmitText}>
-                    {isSignUp ? 'Create Account' : 'Sign In'}
-                  </Text>
-                )}
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={{ alignItems: 'center', marginTop: Spacing.md }}
-                onPress={() => setIsSignUp(v => !v)}
-              >
-                <Text style={styles.switchText}>
-                  {isSignUp
-                    ? 'Already have an account? Sign in'
-                    : "Don't have an account? Sign up"}
+      {/* ── Auth area — white background ──────────────────────── */}
+      <ScrollView
+        style={styles.authArea}
+        contentContainerStyle={styles.authContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {mode === 'social' ? (
+          <>
+            {/* Apple */}
+            <SocialButton
+              label="Continue with Apple"
+              onPress={() => handleSocial('apple')}
+              loading={loading === 'apple'}
+              icon={<AppleIcon />}
+            />
+            {/* Google */}
+            <SocialButton
+              label="Continue with Google"
+              onPress={() => handleSocial('google')}
+              loading={loading === 'google'}
+              icon={<GoogleIcon />}
+            />
+            {/* Facebook */}
+            <SocialButton
+              label="Continue with Facebook"
+              onPress={() => handleSocial('facebook')}
+              loading={loading === 'facebook'}
+              icon={<FacebookIcon />}
+            />
+            {/* Email option (for testing) */}
+            <TouchableOpacity
+              style={styles.emailLink}
+              onPress={() => setMode('email')}
+            >
+              <Text style={styles.emailLinkText}>Sign in with Email →</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <TouchableOpacity onPress={() => setMode('social')} style={styles.backBtn}>
+              <Text style={styles.backBtnText}>‹ Back</Text>
+            </TouchableOpacity>
+            <Text style={styles.emailFormTitle}>
+              {isSignUp ? 'Create account' : 'Welcome back'}
+            </Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Email address"
+              placeholderTextColor={Colors.textTertiary}
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoComplete="email"
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Password"
+              placeholderTextColor={Colors.textTertiary}
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+            />
+            <TouchableOpacity
+              style={styles.emailSubmitBtn}
+              onPress={handleEmailAuth}
+              disabled={loading === 'email'}
+            >
+              {loading === 'email' ? (
+                <ActivityIndicator color={Colors.white} />
+              ) : (
+                <Text style={styles.emailSubmitText}>
+                  {isSignUp ? 'Create Account' : 'Sign In'}
                 </Text>
-              </TouchableOpacity>
-            </>
-          )}
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={{ alignItems: 'center', marginTop: Spacing.sm }}
+              onPress={() => setIsSignUp(v => !v)}
+            >
+              <Text style={styles.switchText}>
+                {isSignUp
+                  ? 'Already have an account? Sign in'
+                  : "Don't have an account? Sign up"}
+              </Text>
+            </TouchableOpacity>
+          </>
+        )}
 
-          <Text style={styles.legalText}>
-            By signing up, you agree to our{' '}
-            <Text
-              style={styles.legalLink}
-              onPress={() => Linking.openURL('https://listaa.app/terms')}
-            >
-              Terms
-            </Text>
-            {' '}and{' '}
-            <Text
-              style={styles.legalLink}
-              onPress={() => Linking.openURL('https://listaa.app/privacy')}
-            >
-              Privacy Policy
-            </Text>
-            .
+        {/* Legal */}
+        <Text style={styles.legal}>
+          By signing up, you agree to our{' '}
+          <Text style={styles.legalLink} onPress={() => Linking.openURL('https://listaa.app/terms')}>
+            Terms
           </Text>
-        </ScrollView>
-      </View>
+          .{'\n'}See how we use your data in our{' '}
+          <Text style={styles.legalLink} onPress={() => Linking.openURL('https://listaa.app/privacy')}>
+            Privacy Policy
+          </Text>
+          .{'\n'}We never post to Facebook.
+        </Text>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
-// ─── Social Button ────────────────────────────────────────────────────────────
+// ─── Social button — white bg, dark border, black text ───────────────────────
 
 function SocialButton({
-  label, icon, onPress, loading, googleStyle, facebookStyle,
+  label, onPress, loading, icon,
 }: {
   label: string;
-  icon: string;
   onPress: () => void;
   loading: boolean;
-  googleStyle?: boolean;
-  facebookStyle?: boolean;
+  icon: React.ReactNode;
 }) {
   return (
     <TouchableOpacity
@@ -242,132 +232,167 @@ function SocialButton({
       disabled={loading}
       activeOpacity={0.75}
     >
-      {loading ? (
-        <ActivityIndicator size="small" color={Colors.white} style={styles.socialIcon} />
-      ) : facebookStyle ? (
-        <View style={[styles.socialIcon, styles.fbIconWrap]}>
-          <Text style={{ color: '#fff', fontSize: 14, fontWeight: '800' }}>f</Text>
-        </View>
-      ) : googleStyle ? (
-        <View style={styles.socialIcon}>
-          <Text style={{ fontSize: 15, fontWeight: '800', color: '#4285F4' }}>G</Text>
-        </View>
-      ) : (
-        <Text style={[styles.socialIcon, { fontSize: 20 }]}>{icon}</Text>
-      )}
+      <View style={styles.socialBtnIcon}>
+        {loading ? <ActivityIndicator size="small" color="#333" /> : icon}
+      </View>
       <Text style={styles.socialBtnText}>{label}</Text>
     </TouchableOpacity>
+  );
+}
+
+// ─── Brand icons ──────────────────────────────────────────────────────────────
+
+function AppleIcon() {
+  return <Text style={{ fontSize: 22, color: '#000', lineHeight: 26 }}>🍎</Text>;
+}
+
+function GoogleIcon() {
+  return (
+    <View style={styles.gIconWrap}>
+      <Text style={styles.gIconB}>G</Text>
+      {/* multicolour G approximation */}
+    </View>
+  );
+}
+
+function FacebookIcon() {
+  return (
+    <View style={styles.fbIconWrap}>
+      <Text style={styles.fbIconText}>f</Text>
+    </View>
   );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: {
+  root: {
     flex: 1,
-    backgroundColor: '#0D0018',
+    backgroundColor: Colors.white,
   },
+
+  /* Hero */
   hero: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'space-around',
-    paddingTop: 72,
-    paddingBottom: Spacing.xl,
-    paddingHorizontal: Spacing.lg,
+    height: HERO_HEIGHT,
+    justifyContent: 'space-between',
   },
   logoWrap: {
     alignItems: 'center',
+    paddingTop: 60,
+  },
+  heroGradient: {
+    paddingHorizontal: Spacing.lg,
+    paddingBottom: Spacing.xl,
+    paddingTop: 80,
   },
   tagline: {
-    color: 'rgba(255,255,255,0.85)',
-    fontSize: 26,
+    color: Colors.white,
+    fontSize: 30,
     fontFamily: 'Georgia',
-    fontWeight: '400',
-    textAlign: 'center',
-    lineHeight: 36,
+    fontWeight: '600',
+    textAlign: 'left',
+    lineHeight: 38,
+    textShadowColor: 'rgba(0,0,0,0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
   },
+
+  /* Auth area */
   authArea: {
-    backgroundColor: '#0D0018',
-    maxHeight: '55%',
+    flex: 1,
+    backgroundColor: Colors.white,
   },
   authContent: {
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.lg,
-    paddingBottom: 36,
+    paddingBottom: 24,
     gap: Spacing.sm,
   },
-  // Social buttons
+
+  /* Social buttons — white bg, thin black border */
   socialBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.35)',
+    backgroundColor: Colors.white,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.2)',
     borderRadius: Radius.full,
-    paddingVertical: 15,
+    paddingVertical: 14,
     paddingHorizontal: Spacing.lg,
-    backgroundColor: 'transparent',
   },
-  socialIcon: {
-    width: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  fbIconWrap: {
-    width: 24,
-    height: 24,
-    borderRadius: 4,
-    backgroundColor: '#1877F2',
-    alignItems: 'center',
+  socialBtnIcon: {
+    width: 32,
+    alignItems: 'flex-start',
     justifyContent: 'center',
   },
   socialBtnText: {
     flex: 1,
     textAlign: 'center',
-    color: Colors.white,
+    color: '#1A1A1A',
     fontSize: 16,
-    fontWeight: '500',
-    letterSpacing: 0.3,
+    fontWeight: '400',
+    marginRight: 32, // balance the icon offset so text looks truly centered
   },
-  // Divider
-  divider: {
-    flexDirection: 'row',
+
+  /* Google icon */
+  gIconWrap: {
+    width: 22,
+    height: 22,
     alignItems: 'center',
-    gap: Spacing.md,
-    marginVertical: Spacing.sm,
+    justifyContent: 'center',
   },
-  dividerLine: { flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.15)' },
-  dividerText: { color: 'rgba(255,255,255,0.4)', fontSize: 13 },
-  // Email toggle
-  emailToggleBtn: {
-    borderWidth: 1.5,
-    borderColor: Colors.primaryLight,
-    borderRadius: Radius.full,
-    paddingVertical: 15,
+  gIconB: {
+    fontSize: 17,
+    fontWeight: '700',
+    // Multicolor approximation — just use the standard "G" look
+    color: '#4285F4',
+  },
+
+  /* Facebook icon */
+  fbIconWrap: {
+    width: 22,
+    height: 22,
+    borderRadius: 4,
+    backgroundColor: '#1877F2',
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  emailToggleText: {
+  fbIconText: {
+    color: Colors.white,
+    fontSize: 14,
+    fontWeight: '800',
+    lineHeight: 18,
+  },
+
+  /* Email link */
+  emailLink: {
+    alignItems: 'center',
+    paddingVertical: Spacing.sm,
+  },
+  emailLinkText: {
     color: Colors.primaryLight,
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 14,
+    fontWeight: '500',
   },
-  // Email form
-  backToSocial: { alignSelf: 'flex-start' },
-  backToSocialText: { color: Colors.primaryLight, fontSize: 16, fontWeight: '500' },
-  emailTitle: {
-    color: Colors.white,
+
+  /* Email form */
+  backBtn: { alignSelf: 'flex-start' },
+  backBtnText: { color: Colors.primaryLight, fontSize: 16, fontWeight: '500' },
+  emailFormTitle: {
     fontFamily: 'Georgia',
     fontSize: 22,
+    color: Colors.textPrimary,
     marginBottom: Spacing.sm,
   },
   input: {
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.2)',
+    borderWidth: 1,
+    borderColor: Colors.border,
     borderRadius: Radius.lg,
     paddingVertical: 14,
     paddingHorizontal: Spacing.lg,
-    color: Colors.white,
+    color: Colors.textPrimary,
     fontSize: 16,
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: Colors.surface,
   },
   emailSubmitBtn: {
     backgroundColor: Colors.primary,
@@ -377,15 +402,19 @@ const styles = StyleSheet.create({
     marginTop: Spacing.sm,
   },
   emailSubmitText: { color: Colors.white, fontSize: 16, fontWeight: '700' },
-  switchText: { color: 'rgba(255,255,255,0.5)', fontSize: 13 },
-  // Legal
-  legalText: {
-    color: 'rgba(255,255,255,0.35)',
-    fontSize: 11,
+  switchText: { color: Colors.textSecondary, fontSize: 13 },
+
+  /* Legal */
+  legal: {
+    color: Colors.textTertiary,
+    fontSize: 12,
     textAlign: 'center',
-    lineHeight: 17,
-    marginTop: Spacing.md,
-    paddingHorizontal: Spacing.md,
+    lineHeight: 18,
+    marginTop: Spacing.sm,
+    paddingHorizontal: Spacing.sm,
   },
-  legalLink: { color: 'rgba(255,255,255,0.6)', textDecorationLine: 'underline' },
+  legalLink: {
+    color: Colors.textPrimary,
+    textDecorationLine: 'underline',
+  },
 });
