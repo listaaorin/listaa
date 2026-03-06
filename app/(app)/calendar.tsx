@@ -5,7 +5,7 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  ActivityIndicator,
+  Image,
 } from 'react-native';
 import { router } from 'expo-router';
 import { Colors, Spacing, Radius, Shadow } from '../../lib/theme';
@@ -13,117 +13,199 @@ import { useAuth } from '../../lib/auth-context';
 import { getArcs } from '../../lib/supabase';
 import { Arc } from '../../lib/types';
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const MONTHS = ['January','February','March','April','May','June',
+                'July','August','September','October','November','December'];
+
+// Colors per event "category" / bubble index
+const EVENT_COLORS = [
+  '#2E7D32',  // green
+  '#6A1B9A',  // purple
+  '#F57F17',  // gold
+  '#212121',  // dark
+  '#880E4F',  // berry/magenta
+  '#1565C0',  // blue
+  '#BF360C',  // deep orange
+  '#004D40',  // teal
+];
+
+// Emoji for different bubble types
+const BUBBLE_EMOJIS: Record<string, string> = {
+  work: '🤖',
+  school: '📚',
+  food: '🍳',
+  health: '🦷',
+  travel: '✈️',
+  birthday: '😘',
+  meeting: '🤝',
+  default: '📅',
+};
+
+interface CalEvent {
+  id: string;
+  title: string;
+  startTime?: string;
+  endTime?: string;
+  color: string;
+  emoji: string;
+  assigneeAvatar?: string;
+  isRecurring?: boolean;
+  arcId?: string;
+}
 
 export default function CalendarScreen() {
-  const { user } = useAuth();
-  const [arcs, setArcs] = useState<Arc[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [currentDate] = useState(new Date());
-  const [selectedDay, setSelectedDay] = useState(new Date().getDate());
+  const { user, profile } = useAuth();
+  const [viewDate, setViewDate]   = useState(new Date());
+  const [events, setEvents]       = useState<CalEvent[]>([]);
 
   useEffect(() => {
-    async function load() {
-      if (!user) return;
-      const { data } = await getArcs(user.id);
-      setArcs((data ?? []) as Arc[]);
-      setLoading(false);
-    }
-    load();
-  }, [user]);
+    loadEvents();
+  }, [user, viewDate]);
 
-  // Build calendar grid for current month
-  const year = currentDate.getFullYear();
-  const month = currentDate.getMonth();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const firstDay = new Date(year, month, 1).getDay();
+  async function loadEvents() {
+    if (!user) return;
+    const { data } = await getArcs(user.id);
+    const arcs = (data ?? []) as Arc[];
 
-  const cells = Array.from({ length: firstDay + daysInMonth }, (_, i) =>
-    i < firstDay ? null : i - firstDay + 1
-  );
+    // Filter arcs with deadlines on this date
+    const dateStr = viewDate.toDateString();
+    const dayArcs = arcs.filter(a => {
+      if (!a.deadline) return false;
+      return new Date(a.deadline).toDateString() === dateStr;
+    });
 
-  // Get arcs with deadlines in this month
-  const arcsByDay: Record<number, Arc[]> = {};
-  arcs.forEach(arc => {
-    if (!arc.deadline) return;
-    const d = new Date(arc.deadline);
-    if (d.getMonth() === month && d.getFullYear() === year) {
-      const day = d.getDate();
-      arcsByDay[day] = [...(arcsByDay[day] ?? []), arc];
-    }
-  });
+    // Convert arcs to events
+    const arcEvents: CalEvent[] = dayArcs.map((arc, i) => ({
+      id: arc.id,
+      title: arc.title,
+      startTime: arc.deadline
+        ? new Date(arc.deadline).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+        : undefined,
+      color: EVENT_COLORS[i % EVENT_COLORS.length],
+      emoji: BUBBLE_EMOJIS.default,
+      arcId: arc.id,
+    }));
 
-  const selectedArcs = arcsByDay[selectedDay] ?? [];
+    setEvents(arcEvents);
+  }
+
+  function goToPrev() {
+    const d = new Date(viewDate);
+    d.setDate(d.getDate() - 1);
+    setViewDate(d);
+  }
+
+  function goToNext() {
+    const d = new Date(viewDate);
+    d.setDate(d.getDate() + 1);
+    setViewDate(d);
+  }
+
+  function goToToday() {
+    setViewDate(new Date());
+  }
+
+  const isToday = viewDate.toDateString() === new Date().toDateString();
+  const dayLabel = isToday
+    ? 'Today'
+    : DAYS[viewDate.getDay()].slice(0, 3) + ', ' + viewDate.getDate() + ' ' + MONTHS[viewDate.getMonth()].slice(0, 3);
+  const subLabel = DAYS[viewDate.getDay()] + ', ' + viewDate.getDate() + ' ' + MONTHS[viewDate.getMonth()];
 
   return (
     <View style={styles.container}>
-      <Text style={styles.headerTitle}>Calendar</Text>
-      <Text style={styles.monthLabel}>{MONTHS[month]} {year}</Text>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.menuBtn} onPress={() => {}}>
+          <View style={styles.menuLine} />
+          <View style={styles.menuLine} />
+          <View style={styles.menuLine} />
+        </TouchableOpacity>
 
-      {/* Day headers */}
-      <View style={styles.dayHeaders}>
-        {DAYS.map(d => (
-          <Text key={d} style={styles.dayHeader}>{d}</Text>
-        ))}
-      </View>
-
-      {/* Calendar grid */}
-      <View style={styles.grid}>
-        {cells.map((day, i) => {
-          if (!day) return <View key={`empty-${i}`} style={styles.cell} />;
-          const isToday = day === currentDate.getDate();
-          const isSelected = day === selectedDay;
-          const hasEvents = !!arcsByDay[day]?.length;
-          return (
-            <TouchableOpacity
-              key={day}
-              style={[styles.cell, isSelected && styles.cellSelected, isToday && !isSelected && styles.cellToday]}
-              onPress={() => setSelectedDay(day)}
-            >
-              <Text style={[styles.cellText, isSelected && styles.cellTextSelected, isToday && !isSelected && styles.cellTextToday]}>
-                {day}
-              </Text>
-              {hasEvents && <View style={[styles.eventDot, isSelected && styles.eventDotSelected]} />}
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-
-      {/* Selected day arcs */}
-      <View style={styles.selectedDay}>
-        <Text style={styles.selectedDayLabel}>
-          {DAYS[new Date(year, month, selectedDay).getDay()]}, {MONTHS[month]} {selectedDay}
-        </Text>
-      </View>
-
-      {loading ? (
-        <ActivityIndicator color={Colors.primary} style={{ marginTop: Spacing.lg }} />
-      ) : selectedArcs.length === 0 ? (
-        <View style={styles.emptyDay}>
-          <Text style={styles.emptyDayText}>No loops due on this day</Text>
-          <TouchableOpacity onPress={() => router.push('/(app)/capture')}>
-            <Text style={styles.addLink}>+ Add a loop with this deadline</Text>
+        <View style={styles.dateNav}>
+          <TouchableOpacity onPress={goToPrev} style={styles.navArrowBtn}>
+            <Text style={styles.navArrow}>‹</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={goToToday}>
+            <Text style={styles.dateTitle}>{isToday ? 'Today' : dayLabel}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={goToNext} style={styles.navArrowBtn}>
+            <Text style={styles.navArrow}>›</Text>
           </TouchableOpacity>
         </View>
-      ) : (
-        <ScrollView contentContainerStyle={styles.arcList}>
-          {selectedArcs.map(arc => (
-            <TouchableOpacity
-              key={arc.id}
-              style={styles.arcItem}
-              onPress={() => router.push(`/(app)/arc/${arc.id}`)}
-            >
-              <View style={[styles.arcStatusDot, {
-                backgroundColor: arc.status === 'open' ? Colors.statusOpen
-                  : arc.status === 'in_progress' ? Colors.statusInProgress
-                  : Colors.statusClosed
-              }]} />
-              <Text style={styles.arcTitle}>{arc.title}</Text>
+
+        {profile?.avatar_url ? (
+          <Image source={{ uri: profile.avatar_url }} style={styles.avatar} />
+        ) : (
+          <View style={[styles.avatar, styles.avatarPlaceholder]}>
+            <Text style={styles.avatarInitial}>
+              {(profile?.first_name ?? '?')[0].toUpperCase()}
+            </Text>
+          </View>
+        )}
+      </View>
+
+      <Text style={styles.subDate}>{subLabel}</Text>
+
+      {/* Events list */}
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.eventsContent}
+      >
+        {events.length === 0 ? (
+          <View style={styles.emptyDay}>
+            <Text style={styles.emptyEmoji}>📅</Text>
+            <Text style={styles.emptyTitle}>Nothing scheduled</Text>
+            <TouchableOpacity onPress={() => router.push('/(app)/add-arc')}>
+              <Text style={styles.emptyAction}>+ Add an Arc with a deadline</Text>
             </TouchableOpacity>
-          ))}
-        </ScrollView>
-      )}
+          </View>
+        ) : (
+          events.map(ev => (
+            <TouchableOpacity
+              key={ev.id}
+              style={[styles.eventBlock, { backgroundColor: ev.color }]}
+              onPress={() => ev.arcId && router.push(`/(app)/arc/${ev.arcId}`)}
+              activeOpacity={0.85}
+            >
+              <View style={styles.eventLeft}>
+                <Text style={styles.eventEmoji}>{ev.emoji}</Text>
+              </View>
+              <View style={styles.eventCenter}>
+                <Text style={styles.eventTitle}>{ev.title}</Text>
+                <View style={styles.eventTimeRow}>
+                  {ev.isRecurring && (
+                    <Text style={styles.eventRepeat}>↻ </Text>
+                  )}
+                  {ev.startTime && (
+                    <Text style={styles.eventTime}>
+                      {ev.startTime}{ev.endTime ? ` - ${ev.endTime}` : ''}
+                    </Text>
+                  )}
+                </View>
+              </View>
+              {ev.assigneeAvatar && (
+                <Image source={{ uri: ev.assigneeAvatar }} style={styles.eventAvatar} />
+              )}
+            </TouchableOpacity>
+          ))
+        )}
+      </ScrollView>
+
+      {/* FABs */}
+      <View style={styles.fabArea} pointerEvents="box-none">
+        <TouchableOpacity
+          style={[styles.fab, styles.micFab]}
+          onPress={() => router.push({ pathname: '/(app)/capture', params: { type: 'voice' } })}
+        >
+          <Text style={styles.fabIcon}>🎙</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.fab, styles.plusFab]}
+          onPress={() => router.push('/(app)/add-arc')}
+        >
+          <Text style={styles.fabPlusText}>+</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -132,100 +214,116 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.background,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingTop: 56,
     paddingHorizontal: Spacing.lg,
+    paddingBottom: Spacing.sm,
   },
-  headerTitle: {
+  menuBtn: { gap: 5, paddingVertical: 4, width: 44 },
+  menuLine: { width: 24, height: 2, backgroundColor: Colors.textPrimary, borderRadius: 1 },
+  dateNav: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+  },
+  navArrowBtn: { padding: 4 },
+  navArrow: { fontSize: 28, color: Colors.textPrimary, lineHeight: 32 },
+  dateTitle: {
     fontFamily: 'Georgia',
     fontSize: 28,
     color: Colors.textPrimary,
-    marginBottom: 4,
-  },
-  monthLabel: {
-    fontSize: 15,
-    color: Colors.textSecondary,
-    marginBottom: Spacing.lg,
-  },
-  dayHeaders: {
-    flexDirection: 'row',
-    marginBottom: 8,
-  },
-  dayHeader: {
-    flex: 1,
     textAlign: 'center',
-    fontSize: 11,
-    fontWeight: '700',
-    color: Colors.textTertiary,
-    letterSpacing: 0.5,
   },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginBottom: Spacing.lg,
-  },
-  cell: {
-    width: '14.28%',
-    aspectRatio: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: Radius.full,
-  },
-  cellSelected: {
-    backgroundColor: Colors.primary,
-  },
-  cellToday: {
-    backgroundColor: Colors.primaryPale,
-  },
-  cellText: {
+  avatar: { width: 44, height: 44, borderRadius: 22 },
+  avatarPlaceholder: { backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center' },
+  avatarInitial: { color: Colors.white, fontSize: 18, fontWeight: '700' },
+  subDate: {
     fontSize: 14,
-    color: Colors.textPrimary,
-  },
-  cellTextSelected: {
-    color: Colors.white,
-    fontWeight: '700',
-  },
-  cellTextToday: {
-    color: Colors.primary,
-    fontWeight: '700',
-  },
-  eventDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-    backgroundColor: Colors.primaryLight,
-    marginTop: 1,
-  },
-  eventDotSelected: {
-    backgroundColor: Colors.white,
-  },
-  selectedDay: {
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-    paddingBottom: Spacing.sm,
+    color: Colors.textSecondary,
+    textAlign: 'center',
     marginBottom: Spacing.md,
   },
-  selectedDayLabel: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.textSecondary,
+  eventsContent: {
+    paddingBottom: 120,
+    gap: 2,
   },
-  emptyDay: {
-    alignItems: 'center',
-    paddingTop: Spacing.xl,
-    gap: Spacing.sm,
-  },
-  emptyDayText: { fontSize: 14, color: Colors.textTertiary },
-  addLink: { fontSize: 14, color: Colors.primaryLight, fontWeight: '600' },
-  arcList: { gap: Spacing.sm, paddingBottom: 80 },
-  arcItem: {
+  eventBlock: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.md,
-    padding: Spacing.md,
-    gap: Spacing.sm,
-    ...Shadow.sm,
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.xl,
+    minHeight: 100,
+    gap: Spacing.md,
   },
-  arcStatusDot: { width: 10, height: 10, borderRadius: 5 },
-  arcTitle: { fontSize: 14, fontWeight: '600', color: Colors.textPrimary, flex: 1 },
+  eventLeft: {
+    width: 44,
+    alignItems: 'center',
+  },
+  eventEmoji: {
+    fontSize: 32,
+  },
+  eventCenter: {
+    flex: 1,
+  },
+  eventTitle: {
+    fontFamily: 'Georgia',
+    fontSize: 22,
+    color: Colors.white,
+    fontWeight: '600',
+    lineHeight: 28,
+  },
+  eventTimeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  eventRepeat: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.8)',
+  },
+  eventTime: {
+    fontSize: 15,
+    color: 'rgba(255,255,255,0.85)',
+  },
+  eventAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.6)',
+  },
+  // Empty
+  emptyDay: {
+    alignItems: 'center',
+    paddingTop: 80,
+    gap: Spacing.md,
+  },
+  emptyEmoji: { fontSize: 56 },
+  emptyTitle: { fontSize: 20, fontWeight: '600', color: Colors.textPrimary },
+  emptyAction: { fontSize: 15, color: Colors.primary, fontWeight: '600' },
+  // FABs
+  fabArea: {
+    position: 'absolute',
+    right: Spacing.lg,
+    bottom: 96,
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  fab: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...Shadow.md,
+  },
+  micFab: { backgroundColor: Colors.surface },
+  plusFab: { backgroundColor: Colors.surface },
+  fabIcon: { fontSize: 26 },
+  fabPlusText: { fontSize: 34, color: Colors.textPrimary, lineHeight: 38, fontWeight: '300' },
 });

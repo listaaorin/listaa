@@ -8,6 +8,7 @@ import {
   Linking,
   Alert,
   ActivityIndicator,
+  Image,
   Dimensions,
 } from 'react-native';
 import { router } from 'expo-router';
@@ -15,6 +16,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as WebBrowser from 'expo-web-browser';
 import { Colors, Typography, Spacing, Radius } from '../../lib/theme';
 import { signInWithApple, signInWithGoogle, signInWithFacebook } from '../../lib/supabase';
+import ListaaLogo from '../../components/shared/ListaaLogo';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -64,10 +66,7 @@ export default function LoginScreen() {
       >
         {/* Logo */}
         <View style={styles.logoContainer}>
-          <Text style={styles.logoText}>
-            <Text style={styles.logoListа}>Lista</Text>
-            <Text style={styles.logоDot}>a.</Text>
-          </Text>
+          <ListaaLogo size="large" />
         </View>
 
         {/* Gradient overlay at bottom */}

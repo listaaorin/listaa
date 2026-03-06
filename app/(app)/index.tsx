@@ -1,180 +1,218 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  RefreshControl,
   Image,
-  ActivityIndicator,
+  Dimensions,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
+  Alert,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
-import { Colors, Spacing, Radius, Shadow } from '../../lib/theme';
+import { Colors, Spacing, Shadow } from '../../lib/theme';
 import { useAuth } from '../../lib/auth-context';
-import { getBubbles, getArcs, getVaultItems } from '../../lib/supabase';
-import { Arc, Bubble, VaultItem } from '../../lib/types';
-import ArcCard from '../../components/arc/ArcCard';
-import BubblePill from '../../components/shared/BubblePill';
-import EmptyState from '../../components/shared/EmptyState';
+import { getBubbles, getArcs } from '../../lib/supabase';
+import { Bubble } from '../../lib/types';
 
-type ToggleMode = 'arc' | 'vault';
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
+
+const CIRCLE_SIZE = Math.min(SCREEN_W * 0.72, 280);
+const OVERLAP     = CIRCLE_SIZE * 0.44;
+const STEP        = CIRCLE_SIZE - OVERLAP;
+
+const BUBBLE_COLORS = [
+  '#C2185B', '#7B2D8B', '#1565C0', '#2E7D32',
+  '#E65100', '#4527A0', '#00695C', '#AD1457',
+];
+
+interface ListaaItem {
+  id: string;
+  name: string;
+  emoji?: string;
+  cover_url?: string;
+  count?: number;
+  isVault?: boolean;
+  isAdd?: boolean;
+  colorIndex?: number;
+}
 
 export default function HomeScreen() {
   const { user, profile } = useAuth();
-  const [mode, setMode] = useState<ToggleMode>('arc');
-  const [bubbles, setBubbles] = useState<Bubble[]>([]);
-  const [selectedBubble, setSelectedBubble] = useState<string | null>(null);
-  const [arcs, setArcs] = useState<Arc[]>([]);
-  const [vaultItems, setVaultItems] = useState<VaultItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const scrollRef = useRef<ScrollView>(null);
+  const [items, setItems]       = useState<ListaaItem[]>([]);
+  const [focusedIdx, setFocusedIdx] = useState(0);
 
   async function load() {
     if (!user) return;
-    const [bubblesRes, arcsRes, vaultRes] = await Promise.all([
+    const [bubblesRes, arcsRes] = await Promise.all([
       getBubbles(user.id),
-      getArcs(user.id, selectedBubble ?? undefined),
-      getVaultItems(user.id, selectedBubble ?? undefined),
+      getArcs(user.id),
     ]);
-    if (bubblesRes.data) setBubbles(bubblesRes.data as Bubble[]);
-    if (arcsRes.data) setArcs(arcsRes.data as Arc[]);
-    if (vaultRes.data) setVaultItems(vaultRes.data as VaultItem[]);
-    setLoading(false);
-    setRefreshing(false);
+    const bubbles = (bubblesRes.data ?? []) as Bubble[];
+    const arcs    = (arcsRes.data ?? []) as any[];
+
+    const counts: Record<string, number> = {};
+    arcs.forEach(a => {
+      if (a.bubble_id) counts[a.bubble_id] = (counts[a.bubble_id] ?? 0) + 1;
+    });
+
+    const listaaItems: ListaaItem[] = [
+      ...bubbles.map((b, i) => ({
+        id: b.id,
+        name: b.name,
+        emoji: b.emoji,
+        count: counts[b.id],
+        colorIndex: i % BUBBLE_COLORS.length,
+      })),
+      { id: '__vault__', name: 'Vault', isVault: true },
+      { id: '__add__',   name: 'New Listaa', isAdd: true },
+    ];
+    setItems(listaaItems);
   }
 
-  useFocusEffect(useCallback(() => { load(); }, [user, selectedBubble]));
+  useFocusEffect(useCallback(() => { load(); }, [user]));
 
-  function onRefresh() {
-    setRefreshing(true);
-    load();
+  function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>) {
+    const y   = e.nativeEvent.contentOffset.y;
+    const idx = Math.round(y / STEP);
+    setFocusedIdx(Math.max(0, Math.min(idx, items.length - 1)));
   }
 
-  const displayName = profile?.first_name || 'there';
-  const activeItems = mode === 'arc' ? arcs : vaultItems;
+  function onItemPress(item: ListaaItem) {
+    if (item.isAdd)   { router.push('/(app)/capture'); return; }
+    if (item.isVault) { router.push('/(app)/search');  return; }
+    // Open listaa content (arcs + vault items for this bubble)
+    router.push({ pathname: '/(app)/arc/[id]', params: { id: item.id } });
+  }
+
+  const focused = items[focusedIdx];
 
   return (
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Text style={styles.backArrow}>‹</Text>
+        <TouchableOpacity style={styles.menuBtn}>
+          <View style={styles.menuLine} />
+          <View style={styles.menuLine} />
+          <View style={styles.menuLine} />
         </TouchableOpacity>
-        <View style={{ flex: 1 }} />
+
+        <Text style={styles.headerTitle}>My Listaas</Text>
+
         <TouchableOpacity onPress={() => router.push('/(app)/partner-invite')}>
-          <View style={styles.partnerInviteBtn}>
-            <Text style={styles.partnerInviteIcon}>👤+</Text>
-          </View>
-        </TouchableOpacity>
-        {profile?.avatar_url ? (
-          <Image source={{ uri: profile.avatar_url }} style={styles.avatar} />
-        ) : (
-          <View style={[styles.avatar, styles.avatarPlaceholder]}>
-            <Text style={styles.avatarInitial}>{displayName[0]?.toUpperCase()}</Text>
-          </View>
-        )}
-      </View>
-
-      {loading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator color={Colors.primary} />
-        </View>
-      ) : (
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
-          contentContainerStyle={styles.scrollContent}
-        >
-          {/* Bubble pills */}
-          {bubbles.length > 0 && (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.bubblesRow} contentContainerStyle={{ gap: Spacing.sm, paddingHorizontal: Spacing.lg }}>
-              <BubblePill
-                label="All"
-                selected={selectedBubble === null}
-                onPress={() => setSelectedBubble(null)}
-              />
-              {bubbles.map(b => (
-                <BubblePill
-                  key={b.id}
-                  label={`${b.emoji ?? ''} ${b.name}`}
-                  selected={selectedBubble === b.id}
-                  onPress={() => setSelectedBubble(b.id)}
-                />
-              ))}
-            </ScrollView>
-          )}
-
-          {/* Content list */}
-          {activeItems.length === 0 ? (
-            <EmptyState mode={mode} onAdd={() => router.push('/(app)/capture')} />
+          {profile?.avatar_url ? (
+            <Image source={{ uri: profile.avatar_url }} style={styles.avatar} />
           ) : (
-            <View style={styles.list}>
-              {mode === 'arc'
-                ? (arcs as Arc[]).map(arc => (
-                    <ArcCard key={arc.id} arc={arc} onPress={() => router.push(`/(app)/arc/${arc.id}`)} onRefresh={load} />
-                  ))
-                : (vaultItems as VaultItem[]).map(item => (
-                    <VaultCard key={item.id} item={item} onPress={() => router.push(`/(app)/vault/${item.id}`)} />
-                  ))
-              }
+            <View style={[styles.avatar, styles.avatarPlaceholder]}>
+              <Text style={styles.avatarInitial}>
+                {(profile?.first_name ?? '?')[0].toUpperCase()}
+              </Text>
             </View>
           )}
-        </ScrollView>
-      )}
-
-      {/* FAB area: mic + plus */}
-      <View style={styles.fabArea}>
-        <TouchableOpacity style={styles.micFab} onPress={() => router.push({ pathname: '/(app)/capture', params: { type: 'voice' } })}>
-          <Text style={styles.fabIcon}>🎙</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.plusFab} onPress={() => router.push('/(app)/capture')}>
-          <Text style={styles.fabPlusIcon}>+</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Mode toggle + FABs row */}
-      <View style={styles.bottomBar}>
-        <View style={styles.togglePill}>
+      {/* Floating label for focused circle */}
+      {focused && !focused.isAdd && (
+        <View style={styles.labelRow} pointerEvents="box-none">
+          <Text style={styles.focusedLabel}>
+            {focused.name}{focused.count ? ` (${focused.count})` : ''}
+          </Text>
           <TouchableOpacity
-            style={[styles.toggleOption, mode === 'vault' && styles.toggleOptionActive]}
-            onPress={() => setMode('vault')}
+            onPress={() => Alert.alert(focused.name, 'Rename, share, or delete this Listaa')}
           >
-            <Text style={[styles.toggleText, mode === 'vault' && styles.toggleTextActive]}>Vault</Text>
+            <Text style={styles.dotsText}>•••</Text>
           </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Stacked circles */}
+      <ScrollView
+        ref={scrollRef}
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        snapToInterval={STEP}
+        decelerationRate="fast"
+        onScroll={onScroll}
+        scrollEventThrottle={16}
+      >
+        {items.map((item, idx) => (
           <TouchableOpacity
-            style={[styles.toggleOption, mode === 'arc' && styles.toggleOptionActive]}
-            onPress={() => setMode('arc')}
+            key={item.id}
+            activeOpacity={0.88}
+            onPress={() => onItemPress(item)}
+            style={[styles.circleWrapper, idx > 0 && { marginTop: -OVERLAP }]}
           >
-            <Text style={[styles.toggleText, mode === 'arc' && styles.toggleTextActive]}>Arc</Text>
+            {item.isAdd ? (
+              <View style={[styles.circle, styles.addCircle]}>
+                <Text style={styles.addPlus}>+</Text>
+              </View>
+            ) : item.isVault ? (
+              <VaultCircle />
+            ) : item.cover_url ? (
+              <Image source={{ uri: item.cover_url }} style={styles.circle} />
+            ) : (
+              <View style={[styles.circle, { backgroundColor: BUBBLE_COLORS[item.colorIndex ?? 0] }]}>
+                {item.emoji ? (
+                  <Text style={styles.bubbleEmoji}>{item.emoji}</Text>
+                ) : (
+                  <Text style={styles.bubbleInitial}>{item.name[0]?.toUpperCase()}</Text>
+                )}
+              </View>
+            )}
           </TouchableOpacity>
+        ))}
+      </ScrollView>
+
+      {/* FABs */}
+      <View style={styles.fabArea} pointerEvents="box-none">
+        <TouchableOpacity
+          style={styles.fab}
+          onPress={() => router.push({ pathname: '/(app)/capture', params: { type: 'voice' } })}
+        >
+          <Text style={styles.fabMicText}>🎙</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.fab}
+          onPress={() => router.push('/(app)/capture')}
+        >
+          <Text style={styles.fabPlusText}>+</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+// ─── Vault Circle ─────────────────────────────────────────────────────────────
+
+function VaultCircle() {
+  const ticks = Array.from({ length: 12 }, (_, i) => i * 30);
+  return (
+    <View style={[styles.circle, styles.vaultCircle]}>
+      <View style={styles.vaultRing}>
+        {ticks.map(angle => (
+          <View
+            key={angle}
+            style={[
+              styles.vaultTick,
+              { transform: [{ rotate: `${angle}deg` }, { translateY: -(CIRCLE_SIZE * 0.36) }] },
+            ]}
+          />
+        ))}
+        <View style={styles.vaultCenter}>
+          <View style={styles.vaultInner} />
         </View>
       </View>
     </View>
   );
 }
 
-// ─── Inline VaultCard (small) ─────────────────────────────────────────────────
-
-function VaultCard({ item, onPress }: { item: VaultItem; onPress: () => void }) {
-  const categoryEmoji: Record<string, string> = {
-    contacts: '📞',
-    documents: '📄',
-    discoveries: '✨',
-    memories: '💛',
-    other: '📁',
-  };
-  return (
-    <TouchableOpacity style={styles.vaultCard} onPress={onPress} activeOpacity={0.7}>
-      <Text style={styles.vaultEmoji}>{categoryEmoji[item.category] ?? '📁'}</Text>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.vaultTitle} numberOfLines={1}>{item.title}</Text>
-        <Text style={styles.vaultContent} numberOfLines={2}>{item.content}</Text>
-      </View>
-    </TouchableOpacity>
-  );
-}
+// ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   container: {
@@ -184,25 +222,29 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: Spacing.lg,
     paddingTop: 56,
+    paddingHorizontal: Spacing.lg,
     paddingBottom: Spacing.md,
-    gap: Spacing.sm,
+    backgroundColor: Colors.background,
+    zIndex: 10,
   },
-  backButton: {
-    width: 32,
-    alignItems: 'center',
+  menuBtn: {
+    gap: 5,
+    paddingVertical: 4,
+    width: 44,
   },
-  backArrow: {
+  menuLine: {
+    width: 24,
+    height: 2,
+    backgroundColor: Colors.textPrimary,
+    borderRadius: 1,
+  },
+  headerTitle: {
+    flex: 1,
+    fontFamily: 'Georgia',
     fontSize: 28,
     color: Colors.textPrimary,
-    lineHeight: 32,
-  },
-  partnerInviteBtn: {
-    marginRight: Spacing.sm,
-  },
-  partnerInviteIcon: {
-    fontSize: 22,
+    textAlign: 'center',
   },
   avatar: {
     width: 44,
@@ -210,7 +252,7 @@ const styles = StyleSheet.create({
     borderRadius: 22,
   },
   avatarPlaceholder: {
-    backgroundColor: Colors.primaryLight,
+    backgroundColor: Colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -219,109 +261,130 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
   },
-  centered: {
+  labelRow: {
+    position: 'absolute',
+    top: SCREEN_H * 0.50,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.lg,
+    zIndex: 20,
+  },
+  focusedLabel: {
+    fontFamily: 'Georgia',
+    fontSize: 22,
+    color: Colors.textPrimary,
     flex: 1,
+  },
+  dotsText: {
+    fontSize: 18,
+    color: Colors.textPrimary,
+    letterSpacing: 2,
+    padding: 8,
+  },
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    alignItems: 'center',
+    paddingTop: Spacing.md,
+    paddingBottom: SCREEN_H * 0.35,
+  },
+  circleWrapper: {
+    width: CIRCLE_SIZE,
+    height: CIRCLE_SIZE,
+  },
+  circle: {
+    width: CIRCLE_SIZE,
+    height: CIRCLE_SIZE,
+    borderRadius: CIRCLE_SIZE / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    ...Shadow.md,
+  },
+  bubbleEmoji: {
+    fontSize: 72,
+  },
+  bubbleInitial: {
+    fontSize: 80,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.8)',
+    fontFamily: 'Georgia',
+  },
+  // Vault
+  vaultCircle: {
+    backgroundColor: '#1C1C1E',
+  },
+  vaultRing: {
+    width: CIRCLE_SIZE * 0.9,
+    height: CIRCLE_SIZE * 0.9,
+    borderRadius: CIRCLE_SIZE * 0.45,
+    borderWidth: 10,
+    borderColor: '#2C2C2E',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  scrollContent: {
-    paddingBottom: 120,
+  vaultTick: {
+    position: 'absolute',
+    width: 2,
+    height: 10,
+    backgroundColor: '#5A5A5A',
+    borderRadius: 1,
   },
-  bubblesRow: {
-    marginBottom: Spacing.md,
+  vaultCenter: {
+    width: CIRCLE_SIZE * 0.42,
+    height: CIRCLE_SIZE * 0.42,
+    borderRadius: CIRCLE_SIZE * 0.21,
+    backgroundColor: '#111',
+    borderWidth: 4,
+    borderColor: '#3A3A3A',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  list: {
-    paddingHorizontal: Spacing.lg,
-    gap: Spacing.sm,
+  vaultInner: {
+    width: CIRCLE_SIZE * 0.16,
+    height: CIRCLE_SIZE * 0.16,
+    borderRadius: CIRCLE_SIZE * 0.08,
+    backgroundColor: '#222',
+    borderWidth: 3,
+    borderColor: '#4A4A4A',
   },
+  // Add circle
+  addCircle: {
+    backgroundColor: Colors.surfaceDim,
+  },
+  addPlus: {
+    fontSize: 56,
+    color: Colors.textTertiary,
+    fontWeight: '200',
+    lineHeight: 60,
+  },
+  // FABs
   fabArea: {
     position: 'absolute',
     right: Spacing.lg,
-    bottom: 100,
-    gap: Spacing.md,
+    bottom: 96,
     alignItems: 'center',
+    gap: Spacing.md,
   },
-  micFab: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+  fab: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     backgroundColor: Colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
     ...Shadow.md,
   },
-  fabIcon: {
-    fontSize: 22,
-  },
-  plusFab: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: Colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...Shadow.md,
-  },
-  fabPlusIcon: {
-    fontSize: 28,
-    color: Colors.textPrimary,
-    lineHeight: 32,
-  },
-  bottomBar: {
-    position: 'absolute',
-    bottom: 80,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    pointerEvents: 'box-none',
-  },
-  togglePill: {
-    flexDirection: 'row',
-    backgroundColor: Colors.toggleBg,
-    borderRadius: Radius.full,
-    padding: 3,
-  },
-  toggleOption: {
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-    borderRadius: Radius.full,
-  },
-  toggleOptionActive: {
-    backgroundColor: Colors.surface,
-    ...Shadow.sm,
-  },
-  toggleText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: Colors.toggleInactive,
-  },
-  toggleTextActive: {
-    color: Colors.toggleActive,
-    fontWeight: '700',
-  },
-  // Vault card
-  vaultCard: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.md,
-    padding: Spacing.md,
-    gap: Spacing.md,
-    ...Shadow.sm,
-  },
-  vaultEmoji: {
+  fabMicText: {
     fontSize: 24,
-    marginTop: 2,
   },
-  vaultTitle: {
-    fontSize: 15,
-    fontWeight: '600',
+  fabPlusText: {
+    fontSize: 32,
     color: Colors.textPrimary,
-    marginBottom: 2,
-  },
-  vaultContent: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-    lineHeight: 18,
+    lineHeight: 36,
+    fontWeight: '300',
   },
 });

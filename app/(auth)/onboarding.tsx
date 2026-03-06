@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -15,10 +15,11 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
-import { Colors, Typography, Spacing, Radius, Shadow } from '../../lib/theme';
+import { Colors, Spacing, Radius, Shadow } from '../../lib/theme';
 import { useAuth } from '../../lib/auth-context';
-import { supabase, upsertProfile, addChild } from '../../lib/supabase';
+import { upsertProfile, addChild } from '../../lib/supabase';
 import { ParentStatus } from '../../lib/types';
+import ListaaLogo from '../../components/shared/ListaaLogo';
 
 const { width } = Dimensions.get('window');
 const TOTAL_STEPS = 4;
@@ -40,14 +41,76 @@ function StepDots({ current }: { current: number }) {
 
 // ─── Parent Status options ────────────────────────────────────────────────────
 
-const STATUS_OPTIONS: { key: ParentStatus; label: string; icon: string }[] = [
-  { key: 'working_parent', label: 'Working Parent', icon: '💼' },
-  { key: 'stay_at_home', label: 'Stay at Home Parent', icon: '🏠' },
-  { key: 'co_parent', label: 'Co-Parent', icon: '👥' },
-  { key: 'single_parent', label: 'Single Parent', icon: '🙋' },
-  { key: 'expecting', label: 'Expecting', icon: '👶' },
-  { key: 'other', label: 'Other', icon: '😊' },
+import Svg, {
+  Path, Circle as SvgCircle, Rect, Line, Polyline
+} from 'react-native-svg';
+
+const STATUS_OPTIONS: { key: ParentStatus; label: string }[] = [
+  { key: 'working_parent',  label: 'Working Parent'     },
+  { key: 'stay_at_home',    label: 'Stay at Home Parent'},
+  { key: 'co_parent',       label: 'Co-Parent'          },
+  { key: 'single_parent',   label: 'Single Parent'      },
+  { key: 'expecting',       label: 'Expecting'          },
+  { key: 'other',           label: 'Other'              },
 ];
+
+// Line-art icons matching the design exactly
+function StatusIcon({ type, active }: { type: ParentStatus; active: boolean }) {
+  const color = active ? Colors.primary : Colors.primaryLight;
+  const s = 36;
+  switch (type) {
+    case 'working_parent':
+      return (
+        <Svg width={s} height={s} viewBox="0 0 24 24">
+          <Rect x="2" y="7" width="20" height="14" rx="2" stroke={color} strokeWidth="1.8" fill="none"/>
+          <Path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" stroke={color} strokeWidth="1.8" fill="none"/>
+          <Line x1="12" y1="12" x2="12" y2="12" stroke={color} strokeWidth="2" strokeLinecap="round"/>
+          <Path d="M2 12h20" stroke={color} strokeWidth="1.5"/>
+        </Svg>
+      );
+    case 'stay_at_home':
+      return (
+        <Svg width={s} height={s} viewBox="0 0 24 24">
+          <Path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9.5z" stroke={color} strokeWidth="1.8" fill="none"/>
+          <Path d="M9 21V12h6v9" stroke={color} strokeWidth="1.8" fill="none"/>
+        </Svg>
+      );
+    case 'co_parent':
+      return (
+        <Svg width={s} height={s} viewBox="0 0 24 24">
+          <SvgCircle cx="9" cy="7" r="3" stroke={color} strokeWidth="1.8" fill="none"/>
+          <SvgCircle cx="15" cy="7" r="3" stroke={color} strokeWidth="1.8" fill="none"/>
+          <Path d="M3 21v-1a6 6 0 0 1 6-6h6a6 6 0 0 1 6 6v1" stroke={color} strokeWidth="1.8" fill="none"/>
+        </Svg>
+      );
+    case 'single_parent':
+      return (
+        <Svg width={s} height={s} viewBox="0 0 24 24">
+          <SvgCircle cx="12" cy="7" r="4" stroke={color} strokeWidth="1.8" fill="none"/>
+          <Path d="M6 21v-1a6 6 0 0 1 12 0v1" stroke={color} strokeWidth="1.8" fill="none"/>
+        </Svg>
+      );
+    case 'expecting':
+      return (
+        <Svg width={s} height={s} viewBox="0 0 24 24">
+          <SvgCircle cx="12" cy="12" r="9" stroke={color} strokeWidth="1.8" fill="none"/>
+          <SvgCircle cx="9" cy="10" r="1" fill={color}/>
+          <SvgCircle cx="15" cy="10" r="1" fill={color}/>
+          <Path d="M9 15a3 3 0 0 0 6 0" stroke={color} strokeWidth="1.8" fill="none" strokeLinecap="round"/>
+        </Svg>
+      );
+    case 'other':
+    default:
+      return (
+        <Svg width={s} height={s} viewBox="0 0 24 24">
+          <SvgCircle cx="12" cy="12" r="9" stroke={color} strokeWidth="1.8" fill="none"/>
+          <SvgCircle cx="9" cy="10" r="1" fill={color}/>
+          <SvgCircle cx="15" cy="10" r="1" fill={color}/>
+          <Path d="M9 15a3 3 0 0 0 6 0" stroke={color} strokeWidth="1.8" fill="none" strokeLinecap="round"/>
+        </Svg>
+      );
+  }
+}
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
@@ -111,6 +174,10 @@ export default function OnboardingScreen() {
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={styles.container}>
+        {/* Logo at top */}
+        <View style={styles.logoRow}>
+          <ListaaLogo size="small" />
+        </View>
         <StepDots current={step} />
 
         {step === 0 && (
@@ -201,7 +268,7 @@ function ProfileStep({ firstName, email, status, onFirstName, onEmail, onStatus 
             onPress={() => onStatus(opt.key)}
             activeOpacity={0.7}
           >
-            <Text style={styles.statusIcon}>{opt.icon}</Text>
+            <StatusIcon type={opt.key} active={status === opt.key} />
             <Text style={[styles.statusLabel, status === opt.key && styles.statusLabelActive]}>{opt.label}</Text>
           </TouchableOpacity>
         ))}
@@ -331,6 +398,10 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
     paddingTop: 56,
+  },
+  logoRow: {
+    alignItems: 'center',
+    marginBottom: Spacing.sm,
   },
   dotsRow: {
     flexDirection: 'row',

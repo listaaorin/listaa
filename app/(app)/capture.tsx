@@ -1,3 +1,12 @@
+/**
+ * Capture Screen — The Hand-Off
+ * Matches the design:
+ *  - Header: ‹ back  |  🔔+ SAVE TO
+ *  - Large "Title/Paste URL here" editable heading
+ *  - "Type here" multiline body
+ *  - Bottom toolbar: image | mic | checklist icons
+ *  - Modes: text (default), checklist, voice
+ */
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -6,579 +15,589 @@ import {
   TouchableOpacity,
   TextInput,
   ScrollView,
-  Alert,
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Dimensions,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { Audio } from 'expo-av';
 import { Colors, Spacing, Radius, Shadow } from '../../lib/theme';
 import { useAuth } from '../../lib/auth-context';
-import { createThing, createArc, createVaultItem, getBubbles, supabase } from '../../lib/supabase';
+import { createThing, createArc, createVaultItem, getBubbles } from '../../lib/supabase';
 import { analyzeContent, ThingAnalysis } from '../../lib/claude';
 import { Bubble } from '../../lib/types';
 
-type CaptureMode = 'text' | 'camera' | 'voice';
-type Stage = 'capture' | 'analyzing' | 'classify';
+type InputMode  = 'text' | 'checklist' | 'voice';
+type Stage      = 'input' | 'analyzing' | 'saveto';
 
-const { height } = Dimensions.get('window');
+interface CheckItem { id: string; text: string; done: boolean }
 
 export default function CaptureScreen() {
-  const { user } = useAuth();
-  const params = useLocalSearchParams<{ type?: string; sharedText?: string }>();
+  const { user }  = useAuth();
+  const params    = useLocalSearchParams<{ type?: string; sharedText?: string }>();
 
-  const [stage, setStage] = useState<Stage>('capture');
-  const [captureMode, setCaptureMode] = useState<CaptureMode>(
+  const [inputMode, setInputMode] = useState<InputMode>(
     params.type === 'voice' ? 'voice' : 'text'
   );
-  const [text, setText] = useState(params.sharedText ?? '');
+  const [stage, setStage]       = useState<Stage>('input');
+  const [title, setTitle]       = useState(params.sharedText ?? '');
+  const [body, setBody]         = useState('');
+  const [checkItems, setCheckItems] = useState<CheckItem[]>([
+    { id: '1', text: '', done: false },
+  ]);
   const [analysis, setAnalysis] = useState<ThingAnalysis | null>(null);
-  const [bubbles, setBubbles] = useState<Bubble[]>([]);
+  const [destination, setDestination] = useState<'arc' | 'vault'>('vault');
+  const [bubbles, setBubbles]   = useState<Bubble[]>([]);
   const [selectedBubble, setSelectedBubble] = useState<string | null>(null);
-  const [selectedDestination, setSelectedDestination] = useState<'arc' | 'vault'>('arc');
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [isRecording, setIsRecording] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [saving, setSaving]     = useState(false);
 
   useEffect(() => {
-    if (user) {
-      getBubbles(user.id).then(({ data }) => {
-        if (data) setBubbles(data as Bubble[]);
-      });
-    }
+    if (user) getBubbles(user.id).then(r => { if (r.data) setBubbles(r.data as Bubble[]); });
+    // Auto-trigger voice if launched in voice mode
+    if (params.type === 'voice') startRecording();
   }, [user]);
 
-  // ─── Camera capture ──────────────────────────────────────────────────────────
-  async function handleCamera() {
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.8,
-    });
-    if (!result.canceled && result.assets[0]) {
-      setText(`[Photo captured: ${result.assets[0].uri}]`);
-      await analyzeAndClassify(`Photo content from camera: ${result.assets[0].uri}`);
-    }
-  }
-
-  // ─── Voice recording ─────────────────────────────────────────────────────────
+  // ─── Voice ──────────────────────────────────────────────────────────────────
   async function startRecording() {
     try {
       await Audio.requestPermissionsAsync();
       await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-      const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
-      setRecording(recording);
+      const { recording: rec } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+      setRecording(rec);
       setIsRecording(true);
-    } catch (e: any) {
-      Alert.alert('Error', 'Could not start recording');
-    }
+    } catch { Alert.alert('Error', 'Could not start recording'); }
   }
 
   async function stopRecording() {
     if (!recording) return;
     setIsRecording(false);
     await recording.stopAndUnloadAsync();
-    const uri = recording.getURI();
     setRecording(null);
-    if (uri) {
-      setText(`[Voice note: ${uri}]`);
-      await analyzeAndClassify('Voice note captured — transcribe and process as a family task or reminder.');
+    setTitle(prev => prev || 'Voice note');
+    setBody('[Voice note captured]');
+  }
+
+  // ─── Image pick ─────────────────────────────────────────────────────────────
+  async function pickImage() {
+    const res = await ImagePicker.launchImageLibraryAsync({ quality: 0.8 });
+    if (!res.canceled && res.assets[0]) {
+      setTitle(prev => prev || 'Image capture');
+      setBody(res.assets[0].uri);
     }
   }
 
-  // ─── AI Analysis ─────────────────────────────────────────────────────────────
-  async function analyzeAndClassify(content: string) {
+  // ─── Proceed to SAVE TO ──────────────────────────────────────────────────────
+  async function handleSaveTo() {
+    const content = title || body || checkItems.map(c => c.text).join(', ');
+    if (!content.trim()) {
+      Alert.alert('Nothing to save', 'Add a title or some content first.');
+      return;
+    }
     setStage('analyzing');
     try {
       const result = await analyzeContent(content, 'text');
       setAnalysis(result);
-      setSelectedDestination(result.destination);
-      setStage('classify');
-    } catch (e) {
-      // Fallback: manual classify
-      setStage('classify');
+      setDestination(result.destination);
+    } catch {
+      // Fallback: just show the save-to UI manually
     }
+    setStage('saveto');
   }
 
-  async function handleTextSubmit() {
-    if (!text.trim()) return;
-    await analyzeAndClassify(text);
-  }
-
-  // ─── Save ─────────────────────────────────────────────────────────────────────
+  // ─── Final save ──────────────────────────────────────────────────────────────
   async function handleSave() {
     if (!user) return;
     setSaving(true);
     try {
-      const thingData = await createThing({
+      const rawContent = inputMode === 'checklist'
+        ? checkItems.map(c => (c.done ? '☑ ' : '☐ ') + c.text).join('\n')
+        : [title, body].filter(Boolean).join('\n');
+
+      await createThing({
         user_id: user.id,
         type: 'text',
-        raw_content: text,
-        destination: selectedDestination,
+        raw_content: rawContent,
+        destination,
         bubble_id: selectedBubble ?? undefined,
       });
 
-      const thingId = thingData.data?.id;
-
-      if (selectedDestination === 'arc') {
+      if (destination === 'arc') {
         await createArc({
           user_id: user.id,
-          title: analysis?.title ?? text.substring(0, 60),
-          description: analysis?.summary,
+          title: analysis?.title ?? title,
+          description: analysis?.summary ?? body,
           deadline: analysis?.deadline ?? undefined,
           bubble_id: selectedBubble ?? undefined,
-          is_shared: false,
         });
       } else {
         await createVaultItem({
           user_id: user.id,
-          title: analysis?.title ?? text.substring(0, 60),
-          content: analysis?.summary ?? text,
+          title: analysis?.title ?? title,
+          content: analysis?.summary ?? rawContent,
           category: (analysis?.category as any) ?? 'other',
           tags: analysis?.tags ?? [],
           bubble_id: selectedBubble ?? undefined,
-          is_shared: false,
         });
       }
-
       router.back();
     } catch (e: any) {
-      Alert.alert('Error saving', e.message);
+      Alert.alert('Error', e.message);
     } finally {
       setSaving(false);
     }
   }
 
-  // ─── Render ──────────────────────────────────────────────────────────────────
+  // ─── Checklist helpers ────────────────────────────────────────────────────────
+  function addCheckItem() {
+    setCheckItems(prev => [...prev, { id: Date.now().toString(), text: '', done: false }]);
+  }
+  function updateCheckItem(id: string, text: string) {
+    setCheckItems(prev => prev.map(c => c.id === id ? { ...c, text } : c));
+  }
+  function toggleCheckItem(id: string) {
+    setCheckItems(prev => prev.map(c => c.id === id ? { ...c, done: !c.done } : c));
+  }
 
+  // ─── ANALYZING state ──────────────────────────────────────────────────────────
   if (stage === 'analyzing') {
     return (
       <View style={styles.analyzingScreen}>
         <ActivityIndicator size="large" color={Colors.primary} />
-        <Text style={styles.analyzingTitle}>Handing off...</Text>
-        <Text style={styles.analyzingSubtitle}>Listaa is reading your Thing</Text>
+        <Text style={styles.analyzingText}>Reading your Thing…</Text>
       </View>
     );
   }
 
+  // ─── SAVE TO state ────────────────────────────────────────────────────────────
+  if (stage === 'saveto') {
+    return (
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={styles.container}>
+          {/* Header */}
+          <View style={styles.header}>
+            <TouchableOpacity onPress={() => setStage('input')}>
+              <Text style={styles.closeBtn}>✕</Text>
+            </TouchableOpacity>
+            <Text style={styles.saveToModalTitle}>Listaa</Text>
+            {saving ? (
+              <ActivityIndicator color={Colors.primary} />
+            ) : (
+              <TouchableOpacity onPress={handleSave}>
+                <Text style={styles.saveBtn}>Save</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          <ScrollView contentContainerStyle={styles.saveToContent} keyboardShouldPersistTaps="handled">
+            {/* SAVE TO toggle */}
+            <Text style={styles.sectionLabel}>SAVE TO</Text>
+            <View style={styles.destToggle}>
+              <TouchableOpacity
+                style={[styles.destToggleOpt, destination === 'vault' && styles.destToggleOptDark]}
+                onPress={() => setDestination('vault')}
+              >
+                <Text style={[styles.destToggleText, destination === 'vault' && styles.destToggleTextDark]}>
+                  My Listaas
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.destToggleOpt, destination === 'arc' && styles.destToggleOptDark]}
+                onPress={() => setDestination('arc')}
+              >
+                <Text style={[styles.destToggleText, destination === 'arc' && styles.destToggleTextDark]}>
+                  Arc
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* AI-extracted title */}
+            {analysis?.title && (
+              <>
+                <Text style={styles.sectionLabel}>TITLE</Text>
+                <View style={styles.titleRow}>
+                  <Text style={styles.titleText}>{analysis.title}</Text>
+                  <TouchableOpacity><Text style={styles.editPencil}>✏️</Text></TouchableOpacity>
+                </View>
+              </>
+            )}
+
+            {/* Tags */}
+            {analysis?.tags && analysis.tags.length > 0 && (
+              <>
+                <Text style={styles.sectionLabel}>TAGS</Text>
+                <View style={styles.tagsWrap}>
+                  {analysis.tags.map(tag => (
+                    <View key={tag} style={styles.tag}>
+                      <Text style={styles.tagText}>#{tag}</Text>
+                      <Text style={styles.tagRemove}>×</Text>
+                    </View>
+                  ))}
+                  <TouchableOpacity style={styles.tag}>
+                    <Text style={styles.tagText}>+add</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+
+            {/* Which Listaa? */}
+            <Text style={styles.sectionLabel}>
+              {destination === 'arc' ? 'SELECT KID/LISTAA' : 'SAVE TO LISTAA'}
+            </Text>
+            {bubbles.map(b => (
+              <TouchableOpacity
+                key={b.id}
+                style={styles.listaaRow}
+                onPress={() => setSelectedBubble(b.id === selectedBubble ? null : b.id)}
+              >
+                <View style={[styles.listaaAvatar, { backgroundColor: Colors.primary }]}>
+                  <Text style={{ fontSize: 18 }}>{b.emoji ?? '📁'}</Text>
+                </View>
+                <Text style={styles.listaaName}>{b.name}</Text>
+                <View style={[styles.listaaCheck, selectedBubble === b.id && styles.listaaCheckSelected]}>
+                  {selectedBubble === b.id && <Text style={styles.listaaCheckMark}>✓</Text>}
+                </View>
+              </TouchableOpacity>
+            ))}
+
+            {/* New Listaa */}
+            <TouchableOpacity style={styles.listaaRow}>
+              <View style={[styles.listaaAvatar, { backgroundColor: '#1A1A1A' }]}>
+                <Text style={{ fontSize: 18, color: Colors.white }}>+</Text>
+              </View>
+              <Text style={styles.listaaName}>New Listaa</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </KeyboardAvoidingView>
+    );
+  }
+
+  // ─── INPUT state ──────────────────────────────────────────────────────────────
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={styles.container}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.closeBtn}>
-            <Text style={styles.closeBtnText}>✕</Text>
+          <TouchableOpacity onPress={() => router.back()}>
+            <Text style={styles.backArrow}>‹</Text>
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>
-            {stage === 'capture' ? 'Hand it off' : 'Where does it go?'}
-          </Text>
+          <View style={{ flex: 1 }} />
+          <TouchableOpacity style={styles.saveToBtn} onPress={handleSaveTo}>
+            <Text style={styles.saveToBell}>🔔</Text>
+            <Text style={styles.saveToText}>SAVE TO</Text>
+          </TouchableOpacity>
         </View>
 
-        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-          {stage === 'capture' && (
+        <ScrollView
+          style={styles.inputScroll}
+          contentContainerStyle={styles.inputContent}
+          keyboardShouldPersistTaps="handled"
+        >
+          {inputMode === 'text' && (
             <>
-              {/* Mode selector */}
-              <View style={styles.modeRow}>
-                {(['text', 'camera', 'voice'] as CaptureMode[]).map(m => (
-                  <TouchableOpacity
-                    key={m}
-                    style={[styles.modeBtn, captureMode === m && styles.modeBtnActive]}
-                    onPress={() => setCaptureMode(m)}
-                  >
-                    <Text style={styles.modeBtnIcon}>
-                      {m === 'text' ? '✏️' : m === 'camera' ? '📷' : '🎙'}
-                    </Text>
-                    <Text style={[styles.modeBtnText, captureMode === m && styles.modeBtnTextActive]}>
-                      {m.charAt(0).toUpperCase() + m.slice(1)}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              {captureMode === 'text' && (
-                <TextInput
-                  style={styles.textArea}
-                  placeholder="What's the Thing? Paste a message, type a task, share a link..."
-                  placeholderTextColor={Colors.textTertiary}
-                  value={text}
-                  onChangeText={setText}
-                  multiline
-                  autoFocus
-                  textAlignVertical="top"
-                />
-              )}
-
-              {captureMode === 'camera' && (
-                <TouchableOpacity style={styles.cameraTile} onPress={handleCamera}>
-                  <Text style={styles.cameraTileIcon}>📷</Text>
-                  <Text style={styles.cameraTileText}>Tap to open camera</Text>
-                  <Text style={styles.cameraTileHint}>OCR will extract the content</Text>
-                </TouchableOpacity>
-              )}
-
-              {captureMode === 'voice' && (
-                <TouchableOpacity
-                  style={[styles.voiceTile, isRecording && styles.voiceTileRecording]}
-                  onPress={isRecording ? stopRecording : startRecording}
-                >
-                  <Text style={styles.voiceTileIcon}>{isRecording ? '⏹' : '🎙'}</Text>
-                  <Text style={styles.voiceTileText}>
-                    {isRecording ? 'Tap to stop' : 'Tap to record'}
-                  </Text>
-                  {isRecording && <View style={styles.recordingPulse} />}
-                </TouchableOpacity>
-              )}
-
-              {text.trim().length > 0 && captureMode === 'text' && (
-                <TouchableOpacity style={styles.handoffBtn} onPress={handleTextSubmit}>
-                  <Text style={styles.handoffBtnText}>Hand it off →</Text>
-                </TouchableOpacity>
-              )}
+              <TextInput
+                style={styles.titleInput}
+                placeholder="Title/Paste URL here"
+                placeholderTextColor={Colors.textSecondary}
+                value={title}
+                onChangeText={setTitle}
+                multiline
+                autoFocus
+              />
+              <TextInput
+                style={styles.bodyInput}
+                placeholder="Type here"
+                placeholderTextColor={Colors.textTertiary}
+                value={body}
+                onChangeText={setBody}
+                multiline
+                textAlignVertical="top"
+              />
             </>
           )}
 
-          {stage === 'classify' && (
+          {inputMode === 'checklist' && (
             <>
-              {/* AI result preview */}
-              {analysis && (
-                <View style={styles.analysisCard}>
-                  <Text style={styles.analysisTitle}>{analysis.title}</Text>
-                  <Text style={styles.analysisSummary}>{analysis.summary}</Text>
-                  {analysis.deadline && (
-                    <View style={styles.analysisTag}>
-                      <Text style={styles.analysisTagText}>📅 {new Date(analysis.deadline).toLocaleDateString()}</Text>
-                    </View>
-                  )}
-                  {analysis.tags.length > 0 && (
-                    <View style={styles.tagsRow}>
-                      {analysis.tags.slice(0, 4).map(tag => (
-                        <View key={tag} style={styles.tag}>
-                          <Text style={styles.tagText}>{tag}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  )}
+              <TextInput
+                style={styles.titleInput}
+                placeholder="Title"
+                placeholderTextColor={Colors.textSecondary}
+                value={title}
+                onChangeText={setTitle}
+              />
+              {checkItems.map((item, i) => (
+                <View key={item.id} style={styles.checkRow}>
+                  {/* Drag handle */}
+                  <View style={styles.dragHandle}>
+                    <View style={styles.dragDot} /><View style={styles.dragDot} />
+                    <View style={styles.dragDot} /><View style={styles.dragDot} />
+                    <View style={styles.dragDot} /><View style={styles.dragDot} />
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.checkbox, item.done && styles.checkboxDone]}
+                    onPress={() => toggleCheckItem(item.id)}
+                  >
+                    {item.done && <Text style={styles.checkboxTick}>✓</Text>}
+                  </TouchableOpacity>
+                  <TextInput
+                    style={styles.checkInput}
+                    placeholder="Add item"
+                    placeholderTextColor={Colors.textTertiary}
+                    value={item.text}
+                    onChangeText={t => updateCheckItem(item.id, t)}
+                    autoFocus={i === 0}
+                    returnKeyType="next"
+                    onSubmitEditing={addCheckItem}
+                  />
                 </View>
-              )}
-
-              {/* Destination: Arc or Vault */}
-              <Text style={styles.classifyLabel}>Where does this go?</Text>
-              <View style={styles.destinationRow}>
-                <TouchableOpacity
-                  style={[styles.destCard, selectedDestination === 'arc' && styles.destCardActive]}
-                  onPress={() => setSelectedDestination('arc')}
-                >
-                  <Text style={styles.destEmoji}>⚡</Text>
-                  <Text style={styles.destTitle}>The Arc</Text>
-                  <Text style={styles.destDesc}>Needs action</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.destCard, selectedDestination === 'vault' && styles.destCardActive]}
-                  onPress={() => setSelectedDestination('vault')}
-                >
-                  <Text style={styles.destEmoji}>🗄</Text>
-                  <Text style={styles.destTitle}>The Vault</Text>
-                  <Text style={styles.destDesc}>Knowledge to keep</Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* Bubble selector */}
-              {bubbles.length > 0 && (
-                <>
-                  <Text style={styles.classifyLabel}>Which bubble?</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.bubblesScroll}>
-                    <View style={styles.bubblesInner}>
-                      <TouchableOpacity
-                        style={[styles.bubbleChip, !selectedBubble && styles.bubbleChipActive]}
-                        onPress={() => setSelectedBubble(null)}
-                      >
-                        <Text style={styles.bubbleChipText}>None</Text>
-                      </TouchableOpacity>
-                      {bubbles.map(b => (
-                        <TouchableOpacity
-                          key={b.id}
-                          style={[styles.bubbleChip, selectedBubble === b.id && styles.bubbleChipActive]}
-                          onPress={() => setSelectedBubble(b.id)}
-                        >
-                          <Text style={styles.bubbleChipText}>{b.emoji} {b.name}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </ScrollView>
-                </>
-              )}
-
-              {/* Save */}
-              <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={saving}>
-                {saving ? (
-                  <ActivityIndicator color={Colors.white} />
-                ) : (
-                  <Text style={styles.saveBtnText}>Handed Off ✓</Text>
-                )}
+              ))}
+              <TouchableOpacity style={styles.addItemBtn} onPress={addCheckItem}>
+                <Text style={styles.addItemText}>+ Add item</Text>
               </TouchableOpacity>
             </>
           )}
+
+          {inputMode === 'voice' && (
+            <View style={styles.voiceArea}>
+              <TouchableOpacity
+                style={[styles.voiceCircle, isRecording && styles.voiceCircleActive]}
+                onPress={isRecording ? stopRecording : startRecording}
+              >
+                <Text style={styles.voiceMic}>🎙</Text>
+              </TouchableOpacity>
+              <Text style={styles.voiceHint}>
+                {isRecording ? 'Recording… tap to stop' : 'Tap to start recording'}
+              </Text>
+              {body ? <Text style={styles.voiceTranscript}>{body}</Text> : null}
+            </View>
+          )}
         </ScrollView>
+
+        {/* Bottom toolbar */}
+        <View style={styles.toolbar}>
+          <TouchableOpacity onPress={pickImage}>
+            <ImageIcon active={false} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setInputMode(inputMode === 'voice' ? 'text' : 'voice')}>
+            <MicIcon active={inputMode === 'voice'} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setInputMode(inputMode === 'checklist' ? 'text' : 'checklist')}>
+            <ChecklistIcon active={inputMode === 'checklist'} />
+          </TouchableOpacity>
+        </View>
       </View>
     </KeyboardAvoidingView>
   );
 }
 
+// ─── Toolbar icons ────────────────────────────────────────────────────────────
+
+function ImageIcon({ active }: { active: boolean }) {
+  const c = active ? Colors.primary : Colors.primaryLight;
+  return (
+    <View style={iconStyles.wrap}>
+      <View style={[iconStyles.imgOuter, { borderColor: c }]}>
+        <View style={[iconStyles.imgInner, { backgroundColor: c }]} />
+        <View style={[iconStyles.imgMountain, { borderBottomColor: c }]} />
+      </View>
+    </View>
+  );
+}
+
+function MicIcon({ active }: { active: boolean }) {
+  const c = active ? Colors.primary : Colors.primaryLight;
+  return (
+    <View style={iconStyles.wrap}>
+      <View style={[iconStyles.micHead, { borderColor: c }]} />
+      <View style={[iconStyles.micBody, { borderColor: c }]} />
+      <View style={[iconStyles.micBase, { backgroundColor: c }]} />
+    </View>
+  );
+}
+
+function ChecklistIcon({ active }: { active: boolean }) {
+  const c = active ? Colors.primary : Colors.primaryLight;
+  return (
+    <View style={iconStyles.wrap}>
+      <View style={[iconStyles.checkBox, { borderColor: c }]}>
+        <Text style={[iconStyles.checkTick, { color: c }]}>✓</Text>
+      </View>
+    </View>
+  );
+}
+
+const iconStyles = StyleSheet.create({
+  wrap: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
+  imgOuter: { width: 22, height: 18, borderWidth: 2, borderRadius: 3, overflow: 'hidden', position: 'relative' },
+  imgInner: { width: 6, height: 6, borderRadius: 3, position: 'absolute', top: 3, left: 3 },
+  imgMountain: { width: 0, height: 0, borderLeftWidth: 8, borderRightWidth: 8, borderBottomWidth: 8, borderLeftColor: 'transparent', borderRightColor: 'transparent', position: 'absolute', bottom: 0, right: 4 },
+  micHead: { width: 10, height: 14, borderRadius: 5, borderWidth: 2, backgroundColor: 'transparent' },
+  micBody: { width: 18, height: 8, borderBottomLeftRadius: 9, borderBottomRightRadius: 9, borderWidth: 2, borderTopWidth: 0, marginTop: -1 },
+  micBase: { width: 2, height: 5, borderRadius: 1, marginTop: 1 },
+  checkBox: { width: 20, height: 20, borderWidth: 2, borderRadius: 3, alignItems: 'center', justifyContent: 'center' },
+  checkTick: { fontSize: 12, fontWeight: '700' },
+});
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-    paddingTop: 56,
-  },
+  container: { flex: 1, backgroundColor: Colors.background },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingTop: 56,
     paddingHorizontal: Spacing.lg,
-    marginBottom: Spacing.lg,
-    gap: Spacing.md,
+    paddingBottom: Spacing.sm,
   },
-  closeBtn: {
-    width: 36,
-    height: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  closeBtnText: {
-    fontSize: 20,
-    color: Colors.textSecondary,
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontFamily: 'Georgia',
-    fontWeight: '400',
-    color: Colors.textPrimary,
-  },
-  scrollContent: {
-    padding: Spacing.lg,
-    paddingBottom: 48,
-  },
-  modeRow: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-    marginBottom: Spacing.lg,
-  },
-  modeBtn: {
-    flex: 1,
+  backArrow: { fontSize: 32, color: Colors.primary, lineHeight: 36 },
+  closeBtn:  { fontSize: 22, color: Colors.textSecondary, padding: 4 },
+  saveToBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 12,
-    borderRadius: Radius.full,
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    gap: 4,
   },
-  modeBtnActive: {
-    backgroundColor: Colors.primaryPale,
-    borderColor: Colors.primaryLight,
-  },
-  modeBtnIcon: {
-    fontSize: 16,
-  },
-  modeBtnText: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: Colors.textSecondary,
-  },
-  modeBtnTextActive: {
-    color: Colors.primaryLight,
-    fontWeight: '700',
-  },
-  textArea: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.lg,
-    padding: Spacing.md,
-    fontSize: 16,
-    color: Colors.textPrimary,
-    minHeight: 180,
-    lineHeight: 24,
-    ...Shadow.sm,
-  },
-  cameraTile: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.lg,
-    height: 200,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.sm,
-    borderWidth: 2,
-    borderColor: Colors.border,
-    borderStyle: 'dashed',
-  },
-  cameraTileIcon: { fontSize: 48 },
-  cameraTileText: { fontSize: 18, fontWeight: '600', color: Colors.textPrimary },
-  cameraTileHint: { fontSize: 13, color: Colors.textTertiary },
-  voiceTile: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.lg,
-    height: 200,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.sm,
-    borderWidth: 2,
-    borderColor: Colors.border,
-    position: 'relative',
-    overflow: 'hidden',
-  },
-  voiceTileRecording: {
-    borderColor: Colors.statusOpen,
-    backgroundColor: '#FEE8F0',
-  },
-  voiceTileIcon: { fontSize: 48 },
-  voiceTileText: { fontSize: 18, fontWeight: '600', color: Colors.textPrimary },
-  recordingPulse: {
-    position: 'absolute',
-    width: 200,
-    height: 200,
-    borderRadius: 100,
-    backgroundColor: Colors.primaryLight,
-    opacity: 0.1,
-  },
-  handoffBtn: {
-    backgroundColor: Colors.primary,
-    borderRadius: Radius.full,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginTop: Spacing.md,
-  },
-  handoffBtnText: {
-    color: Colors.white,
-    fontSize: 17,
-    fontWeight: '600',
-  },
-  // Analyzing
-  analyzingScreen: {
-    flex: 1,
-    backgroundColor: Colors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.md,
-  },
-  analyzingTitle: {
-    fontFamily: 'Georgia',
-    fontSize: 28,
-    color: Colors.textPrimary,
-  },
-  analyzingSubtitle: {
-    fontSize: 15,
-    color: Colors.textSecondary,
-  },
-  // Classify
-  analysisCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.lg,
-    padding: Spacing.md,
-    marginBottom: Spacing.lg,
-    gap: Spacing.sm,
-    ...Shadow.sm,
-  },
-  analysisTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  analysisSummary: {
+  saveToBell: { fontSize: 20 },
+  saveToText: {
     fontSize: 14,
-    color: Colors.textSecondary,
-    lineHeight: 20,
+    fontWeight: '800',
+    color: Colors.primary,
+    letterSpacing: 1,
   },
-  analysisTag: {
-    alignSelf: 'flex-start',
-    backgroundColor: Colors.background,
-    borderRadius: Radius.full,
-    paddingHorizontal: 10,
+  // Input area
+  inputScroll: { flex: 1 },
+  inputContent: { padding: Spacing.lg, gap: Spacing.sm },
+  titleInput: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+    lineHeight: 30,
+    minHeight: 40,
+  },
+  bodyInput: {
+    fontSize: 16,
+    color: Colors.textSecondary,
+    lineHeight: 24,
+    minHeight: 200,
+  },
+  // Checklist
+  checkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
     paddingVertical: 4,
   },
-  analysisTagText: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-  },
-  tagsRow: {
+  dragHandle: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 6,
+    width: 14,
+    gap: 3,
   },
-  tag: {
-    backgroundColor: Colors.primaryPale,
-    borderRadius: Radius.full,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-  },
-  tagText: {
-    fontSize: 12,
-    color: Colors.primaryLight,
-    fontWeight: '500',
-  },
-  classifyLabel: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-    marginBottom: Spacing.sm,
-  },
-  destinationRow: {
-    flexDirection: 'row',
-    gap: Spacing.md,
-    marginBottom: Spacing.lg,
-  },
-  destCard: {
-    flex: 1,
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.lg,
-    padding: Spacing.md,
-    alignItems: 'center',
-    gap: 6,
+  dragDot: { width: 3, height: 3, borderRadius: 1.5, backgroundColor: Colors.textTertiary },
+  checkbox: {
+    width: 20,
+    height: 20,
     borderWidth: 2,
-    borderColor: Colors.border,
+    borderColor: Colors.primaryLight,
+    borderRadius: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxDone: { backgroundColor: Colors.primaryLight },
+  checkboxTick: { color: Colors.white, fontSize: 12, fontWeight: '700' },
+  checkInput: { flex: 1, fontSize: 16, color: Colors.textPrimary },
+  addItemBtn: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingLeft: 38 },
+  addItemText: { fontSize: 15, color: Colors.textSecondary },
+  // Voice
+  voiceArea: { alignItems: 'center', paddingTop: 60, gap: Spacing.lg },
+  voiceCircle: {
+    width: 100, height: 100, borderRadius: 50,
+    backgroundColor: Colors.surfaceDim,
+    alignItems: 'center', justifyContent: 'center',
+    ...Shadow.md,
+  },
+  voiceCircleActive: { backgroundColor: '#FEE8F0' },
+  voiceMic: { fontSize: 44 },
+  voiceHint: { fontSize: 15, color: Colors.textSecondary },
+  voiceTranscript: { fontSize: 14, color: Colors.textPrimary, lineHeight: 22, paddingHorizontal: Spacing.lg, textAlign: 'center' },
+  // Toolbar
+  toolbar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    gap: Spacing.xl,
+    backgroundColor: Colors.background,
+  },
+  // Analyzing
+  analyzingScreen: { flex: 1, backgroundColor: Colors.background, alignItems: 'center', justifyContent: 'center', gap: Spacing.lg },
+  analyzingText: { fontFamily: 'Georgia', fontSize: 22, color: Colors.textPrimary },
+  // Save-to modal
+  saveToModalTitle: {
+    flex: 1, textAlign: 'center',
+    fontFamily: 'Georgia', fontSize: 22, color: Colors.textPrimary,
+  },
+  saveBtn: { fontSize: 16, fontWeight: '600', color: Colors.primary },
+  saveToContent: { padding: Spacing.lg, gap: Spacing.lg, paddingBottom: 48 },
+  sectionLabel: {
+    fontSize: 12, fontWeight: '800', color: Colors.textTertiary,
+    letterSpacing: 1.5, textAlign: 'center',
+  },
+  destToggle: {
+    flexDirection: 'row',
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.full,
+    padding: 3,
+    alignSelf: 'center',
     ...Shadow.sm,
   },
-  destCardActive: {
-    borderColor: Colors.primary,
-    backgroundColor: Colors.primaryPale,
+  destToggleOpt: {
+    paddingHorizontal: 28, paddingVertical: 10, borderRadius: Radius.full,
   },
-  destEmoji: { fontSize: 32 },
-  destTitle: { fontSize: 15, fontWeight: '700', color: Colors.textPrimary },
-  destDesc: { fontSize: 12, color: Colors.textSecondary, textAlign: 'center' },
-  bubblesScroll: {
-    marginBottom: Spacing.lg,
+  destToggleOptDark: { backgroundColor: '#1A1A1A' },
+  destToggleText: { fontSize: 15, fontWeight: '600', color: Colors.textSecondary },
+  destToggleTextDark: { color: Colors.white },
+  // AI title row
+  titleRow: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: Colors.surface, borderRadius: Radius.lg,
+    paddingHorizontal: Spacing.lg, paddingVertical: Spacing.md,
+    gap: Spacing.md, ...Shadow.sm,
   },
-  bubblesInner: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-  },
-  bubbleChip: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 8,
-    borderRadius: Radius.full,
+  titleText: { flex: 1, fontSize: 15, color: Colors.textPrimary },
+  editPencil: { fontSize: 16 },
+  // Tags
+  tagsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  tag: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    borderWidth: 1, borderColor: Colors.border,
+    borderRadius: Radius.full, paddingHorizontal: 12, paddingVertical: 6,
     backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.border,
   },
-  bubbleChipActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
+  tagText: { fontSize: 13, color: Colors.textPrimary },
+  tagRemove: { fontSize: 14, color: Colors.textTertiary },
+  // Listaa rows
+  listaaRow: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
+    paddingVertical: Spacing.sm,
   },
-  bubbleChipText: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: Colors.textPrimary,
+  listaaAvatar: {
+    width: 52, height: 52, borderRadius: 26,
+    alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
   },
-  saveBtn: {
-    backgroundColor: Colors.primary,
-    borderRadius: Radius.full,
-    paddingVertical: 18,
-    alignItems: 'center',
+  listaaName: { flex: 1, fontSize: 17, color: Colors.textPrimary, fontWeight: '500' },
+  listaaCheck: {
+    width: 28, height: 28, borderRadius: 14,
+    borderWidth: 2, borderColor: Colors.border,
+    alignItems: 'center', justifyContent: 'center',
   },
-  saveBtnText: {
-    color: Colors.white,
-    fontSize: 17,
-    fontWeight: '700',
-  },
+  listaaCheckSelected: { backgroundColor: '#1A1A1A', borderColor: '#1A1A1A' },
+  listaaCheckMark: { color: Colors.white, fontSize: 14, fontWeight: '700' },
 });

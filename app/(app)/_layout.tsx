@@ -74,12 +74,14 @@ export default function AppLayout() {
           tabBarIcon: ({ focused }) => <CalendarIcon focused={focused} />,
         }}
       />
-      <Tabs.Screen name="arc/index" options={{ href: null }} />
-      <Tabs.Screen name="arc/[id]" options={{ href: null }} />
-      <Tabs.Screen name="vault/index" options={{ href: null }} />
-      <Tabs.Screen name="vault/[id]" options={{ href: null }} />
-      <Tabs.Screen name="capture" options={{ href: null }} />
-      <Tabs.Screen name="partner-invite" options={{ href: null }} />
+      <Tabs.Screen name="arc/index"       options={{ href: null }} />
+      <Tabs.Screen name="arc/[id]"        options={{ href: null }} />
+      <Tabs.Screen name="vault/index"     options={{ href: null }} />
+      <Tabs.Screen name="vault/[id]"      options={{ href: null }} />
+      <Tabs.Screen name="capture"         options={{ href: null }} />
+      <Tabs.Screen name="add-arc"         options={{ href: null }} />
+      <Tabs.Screen name="partner-invite"  options={{ href: null }} />
+      <Tabs.Screen name="listaa/[id]"     options={{ href: null }} />
     </Tabs>
   );
 }
