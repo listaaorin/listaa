@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 
 const client = new Anthropic({
   apiKey: process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY ?? '',
+  dangerouslyAllowBrowser: true,
 });
 
 export interface ThingAnalysis {
