@@ -20,7 +20,6 @@ import { Colors, Spacing, Radius } from '../../lib/theme';
 import {
   signInWithApple,
   signInWithGoogle,
-  signInWithFacebook,
   signInWithEmail,
   signUpWithEmail,
 } from '../../lib/supabase';
@@ -34,21 +33,19 @@ const HERO_HEIGHT = SCREEN_H * 0.65;
 // Swap this for your real family photo — place it at assets/hero-family.jpg
 const HERO_IMAGE = require('../../assets/hero-family.jpg');
 
-type AuthMode = 'social' | 'email';
+type AuthMode = 'options' | 'email';
 
 export default function LoginScreen() {
-  const [mode, setMode]         = useState<AuthMode>('social');
+  const [mode, setMode]         = useState<AuthMode>('options');
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading]   = useState<string | null>(null);
 
-  async function handleSocial(provider: 'google' | 'apple' | 'facebook') {
+  async function handleSocial(provider: 'google' | 'apple') {
     setLoading(provider);
     try {
-      const fn = provider === 'google'   ? signInWithGoogle
-               : provider === 'apple'    ? signInWithApple
-               : signInWithFacebook;
+      const fn = provider === 'google' ? signInWithGoogle : signInWithApple;
       const { error } = await fn();
       if (error) Alert.alert('Sign in failed', error.message);
     } finally {
@@ -115,7 +112,7 @@ export default function LoginScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        {mode === 'social' ? (
+        {mode === 'options' ? (
           <>
             {/* Apple */}
             <SocialButton
@@ -131,24 +128,17 @@ export default function LoginScreen() {
               loading={loading === 'google'}
               icon={<GoogleIcon />}
             />
-            {/* Facebook */}
+            {/* Email */}
             <SocialButton
-              label="Continue with Facebook"
-              onPress={() => handleSocial('facebook')}
-              loading={loading === 'facebook'}
-              icon={<FacebookIcon />}
-            />
-            {/* Email option (for testing) */}
-            <TouchableOpacity
-              style={styles.emailLink}
+              label="Continue with Email"
               onPress={() => setMode('email')}
-            >
-              <Text style={styles.emailLinkText}>Sign in with Email →</Text>
-            </TouchableOpacity>
+              loading={false}
+              icon={<EmailIcon />}
+            />
           </>
         ) : (
           <>
-            <TouchableOpacity onPress={() => setMode('social')} style={styles.backBtn}>
+            <TouchableOpacity onPress={() => setMode('options')} style={styles.backBtn}>
               <Text style={styles.backBtnText}>‹ Back</Text>
             </TouchableOpacity>
             <Text style={styles.emailFormTitle}>
@@ -208,7 +198,7 @@ export default function LoginScreen() {
           <Text style={styles.legalLink} onPress={() => Linking.openURL('https://listaa.app/privacy')}>
             Privacy Policy
           </Text>
-          .{'\n'}We never post to Facebook.
+          .
         </Text>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -255,10 +245,10 @@ function GoogleIcon() {
   );
 }
 
-function FacebookIcon() {
+function EmailIcon() {
   return (
-    <View style={styles.fbIconWrap}>
-      <Text style={styles.fbIconText}>f</Text>
+    <View style={styles.emailIconWrap}>
+      <Text style={styles.emailIconText}>✉</Text>
     </View>
   );
 }
@@ -348,31 +338,16 @@ const styles = StyleSheet.create({
     color: '#4285F4',
   },
 
-  /* Facebook icon */
-  fbIconWrap: {
+  /* Email icon */
+  emailIconWrap: {
     width: 22,
     height: 22,
-    borderRadius: 4,
-    backgroundColor: '#1877F2',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  fbIconText: {
-    color: Colors.white,
-    fontSize: 14,
-    fontWeight: '800',
-    lineHeight: 18,
-  },
-
-  /* Email link */
-  emailLink: {
-    alignItems: 'center',
-    paddingVertical: Spacing.sm,
-  },
-  emailLinkText: {
-    color: Colors.primaryLight,
-    fontSize: 14,
-    fontWeight: '500',
+  emailIconText: {
+    fontSize: 16,
+    color: '#555',
   },
 
   /* Email form */
