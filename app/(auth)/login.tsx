@@ -37,10 +37,12 @@ type AuthMode = 'options' | 'email';
 
 export default function LoginScreen() {
   const [mode, setMode]         = useState<AuthMode>('options');
-  const [isSignUp, setIsSignUp] = useState(false);
+  const [isSignUp, setIsSignUp] = useState(true);
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading]   = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
 
   async function handleSocial(provider: 'google' | 'apple') {
     setLoading(provider);
@@ -53,25 +55,44 @@ export default function LoginScreen() {
     }
   }
 
+  function switchMode(signUp: boolean) {
+    setIsSignUp(signUp);
+    setErrorMsg('');
+    setSuccessMsg('');
+  }
+
   async function handleEmailAuth() {
+    setErrorMsg('');
+    setSuccessMsg('');
     if (!email.trim() || !password.trim()) {
-      Alert.alert('Missing fields', 'Please enter your email and password.');
+      setErrorMsg('Please enter your email and password.');
+      return;
+    }
+    if (password.length < 6) {
+      setErrorMsg('Password must be at least 6 characters.');
       return;
     }
     setLoading('email');
     try {
-      const { error } = isSignUp
-        ? await signUpWithEmail(email.trim(), password)
-        : await signInWithEmail(email.trim(), password);
-
-      if (error) {
-        Alert.alert(isSignUp ? 'Sign up failed' : 'Sign in failed', error.message);
-      } else if (isSignUp) {
-        Alert.alert(
-          'Check your email',
-          'We sent you a confirmation link. Open it, then come back and sign in.',
-          [{ text: 'OK', onPress: () => setIsSignUp(false) }],
-        );
+      if (isSignUp) {
+        const { data, error } = await signUpWithEmail(email.trim(), password);
+        if (error) {
+          setErrorMsg(error.message);
+        } else if (data.session) {
+          // Email confirmation disabled — user is logged in immediately
+        } else {
+          setSuccessMsg('Account created! Check your email for a confirmation link, then sign in.');
+          switchMode(false);
+        }
+      } else {
+        const { error } = await signInWithEmail(email.trim(), password);
+        if (error) {
+          setErrorMsg(
+            error.message.toLowerCase().includes('invalid')
+              ? 'Incorrect email or password.'
+              : error.message,
+          );
+        }
       }
     } finally {
       setLoading(null);
@@ -144,6 +165,16 @@ export default function LoginScreen() {
             <Text style={styles.emailFormTitle}>
               {isSignUp ? 'Create account' : 'Welcome back'}
             </Text>
+            {!!errorMsg && (
+              <View style={styles.errorBanner}>
+                <Text style={styles.errorBannerText}>{errorMsg}</Text>
+              </View>
+            )}
+            {!!successMsg && (
+              <View style={styles.successBanner}>
+                <Text style={styles.successBannerText}>{successMsg}</Text>
+              </View>
+            )}
             <TextInput
               style={styles.input}
               placeholder="Email address"
@@ -156,7 +187,7 @@ export default function LoginScreen() {
             />
             <TextInput
               style={styles.input}
-              placeholder="Password"
+              placeholder={isSignUp ? 'Password (min. 6 characters)' : 'Password'}
               placeholderTextColor={Colors.textTertiary}
               value={password}
               onChangeText={setPassword}
@@ -177,7 +208,7 @@ export default function LoginScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               style={{ alignItems: 'center', marginTop: Spacing.sm }}
-              onPress={() => setIsSignUp(v => !v)}
+              onPress={() => switchMode(!isSignUp)}
             >
               <Text style={styles.switchText}>
                 {isSignUp
@@ -348,6 +379,30 @@ const styles = StyleSheet.create({
   emailIconText: {
     fontSize: 16,
     color: '#555',
+  },
+
+  /* Inline banners */
+  errorBanner: {
+    backgroundColor: '#FEE2E2',
+    borderRadius: Radius.md,
+    paddingVertical: 10,
+    paddingHorizontal: Spacing.md,
+  },
+  errorBannerText: {
+    color: '#DC2626',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  successBanner: {
+    backgroundColor: '#DCFCE7',
+    borderRadius: Radius.md,
+    paddingVertical: 10,
+    paddingHorizontal: Spacing.md,
+  },
+  successBannerText: {
+    color: '#16A34A',
+    fontSize: 14,
+    lineHeight: 20,
   },
 
   /* Email form */
